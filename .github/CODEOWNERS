@@ -1,0 +1,8 @@
+# 默认评审人：所有变更至少由维护者之一评审
+* @dlg591103-cpu @PINGNINGYI
+
+# 文档与规则由仓库拥有者批准
+/docs/ @dlg591103-cpu
+/AGENTS.md @dlg591103-cpu
+/CONTRIBUTING.md @dlg591103-cpu @PINGNINGYI
+/.github/ @dlg591103-cpu @PINGNINGYI
