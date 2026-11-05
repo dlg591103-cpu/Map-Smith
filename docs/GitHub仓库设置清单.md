@@ -2,7 +2,7 @@
 
 > 适用对象：仓库拥有者 `dlg591103-cpu`。本清单是 GitHub 网页点击步骤，**不是规则正文**；协作规则见 [工程规则.md](工程规则.md) 第 10 节。
 >
-> 当前状态：以下步骤尚未执行，仓库可见性尚未修改。执行完一项勾选一项，未执行前不得声称已生效。
+> 当前状态：2026-11-05 已完成第 1—3 节，并完成第 6 节的主要实测；第 4、5 节与 PR 模板自动填充尚未逐项验证。`[x]` 仅表示已验证项，未验证项保持未勾选。
 
 ## 1. 仓库转为公开
 
@@ -28,29 +28,31 @@
 
 路径：`Settings` → `Branches` → `Add branch protection rule`（新版界面可能叫 `Rules` → `Rulesets`，按实际界面操作）。
 
-分支名模式：`main`。勾选：
+分支名模式：`main`。勾选（`[x]` 表示已实测项）：
 
-- [ ] `Require a pull request before merging`
-  - [ ] `Require approvals` 设为 **1**
+- [x] `Require a pull request before merging`
+  - [x] `Require approvals` 设为 **1**
   - [ ] `Dismiss stale pull request approvals when new commits are pushed`
-  - [ ] `Require review from Code Owners`（使 `.github/CODEOWNERS` 生效）
+  - [x] `Require review from Code Owners`（使 `.github/CODEOWNERS` 生效）
   - [ ] `Require approval of the most recent reviewable push`（可选，建议开启）
 - [ ] `Require conversation resolution before merging`
 - [ ] `Do not allow bypassing the above settings`（包含管理员，避免维护者绕过）
-- [ ] `Block force pushes`
+- [ ] 不勾选 `Allow force pushes`（经典规则没有正向的 `Block force pushes`；不勾选即禁止强推，尚未单独实测）
 - [ ] 不勾选 `Allow deletions`
 
 说明：GitHub 免费账户的公开仓库支持经典分支保护；若界面已迁移到 Rulesets，对应选项为 `Require a pull request`、`Required approvals`、`Require review from Code Owners`、`Require conversation resolution`、`Block force pushes`。
 
 完成标志：本地执行 `git push origin main` 被拒绝（提示 protected branch），而推送任务分支正常。
 
+实测记录（2026-11-05）：`PINGNINGYI` 直推 `main` 返回 protected branch / GH006；PR #2 显示 `Merging is blocked`、`1 pending review`，并自动请求 `dlg591103-cpu` 作为 code owner。`Dismiss stale`、强制推送与删除的拦截未单独实测。
+
 ## 4. 合并方式
 
 路径：`Settings` → `General` → `Pull Requests`。
 
-- [x] `Allow squash merging`，默认提交信息选 `Pull request title`。
+- [x] `Allow squash merging`，默认提交信息选 `Pull request title`（PR #1 已用 Squash 合并成功）。
 - [ ] 关闭 `Allow merge commits` 与 `Allow rebase merging`（可选，保持 `main` 历史线性）。
-- [x] `Automatically delete head branches`（可选，减少残留分支）。
+- [ ] `Automatically delete head branches`（可选，减少残留分支；未确认）。
 
 说明：规则第 10 节约定使用 Squash 合并；关闭其他合并方式可强制该约定。
 
@@ -59,7 +61,7 @@
 路径：仓库首页 → `Issues` / `Pull requests`。
 
 - [ ] 新建 Issue 时能看到「缺陷报告」「功能建议」两个模板，且不能创建空白 Issue。
-- [ ] 新建 PR 时能看到 `.github/PULL_REQUEST_TEMPLATE.md` 的模板内容。
+- [ ] 新建 PR 时能看到 `.github/PULL_REQUEST_TEMPLATE.md` 的模板内容（PR #2 描述为空，尚无法确认模板是否自动填充；下次建 PR 时核对）。
 - [ ] 仓库首页 `Community Standards` 检查项能看到 `CONTRIBUTING.md` 被识别。
 
 ## 6. 验收实测
@@ -73,7 +75,12 @@
 5. 维护者批准后 Squash 合并；确认 `main` 历史只增加一个提交。
 6. 尝试直接 `git push origin main`，确认被拒绝。
 
-记录：PR 链接、批准人、合并提交 SHA、被拒绝的推送输出。失败情况如实记录，不勾选完成。
+记录（2026-11-05）：
+
+- 权限：`PINGNINGYI` 直接向本仓库推送 `docs/test-collab` 成功，确认为 Write。
+- PR #2：`https://github.com/dlg591103-cpu/webgis-twin-lab/pull/2`，显示 `Merging is blocked`、`1 pending review`，自动请求 `dlg591103-cpu` 作为 code owner；该 PR 为验证用途，已关闭、不合并。
+- 直推 `main`：返回 protected branch / GH006，拒绝成功。
+- 未验证：PR 模板自动填充；协作者 PR 获批后 Squash 合并（PR #1 由维护者本人发起）。
 
 ## 7. 常见问题
 

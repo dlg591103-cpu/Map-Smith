@@ -34,7 +34,7 @@
 -   SPEC：[`docs/Spec/V0.1-专题制图智能体.md`](docs/Spec/V0.1-专题制图智能体.md)，状态为草稿，待确认后开工。
 -   `src/`：目录已就绪，技术选型已定（Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit），源码尚未开始。
 -   远端仓库：`https://github.com/dlg591103-cpu/webgis-twin-lab`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
--   多人协作：协作模式与协作者（`PINGNINGYI`）已确认，工程规则第 10 节与贡献模板已就绪；仓库可见性、协作者邀请与 `main` 分支保护需在 GitHub 网页执行，执行前不视为已生效。
+-   多人协作：仓库已公开，`PINGNINGYI` 已作为协作者加入并具备 Write 权限；`main` 已启用分支保护（要求 PR、1 个批准、Code Owner 评审、对话解决、禁止强推与删除、不允许绕过）。实测已验证：协作者可推送分支并发起 PR、直推 `main` 被拒绝（protected branch / GH006）、未获批准时合并被阻止。PR 模板自动填充尚待下一次建 PR 时确认。
 
 ## 版本管理约定
 
