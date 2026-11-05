@@ -26,9 +26,9 @@
 ## 当前状态
 
 -   项目骨架已建立并纳入版本控制：`README.md`、`AGENTS.md`、`docs/`、`src/`。
--   产品事实文档：尚未建立，等待产品讨论确认后按主题逐个建立。
--   SPEC：尚无开发任务，目录已就绪。
--   `src/`：目录已就绪，技术选型与源码尚未开始。
+-   产品事实文档：已建立 8 份（产品定义、范围与边界、架构原则、三 Agent 协议、MapSpec 与工具契约、数据源、制图规范、交付形态），位于 [`docs/facts/`](docs/facts/)。
+-   SPEC：[`docs/Spec/V0.1-专题制图智能体.md`](docs/Spec/V0.1-专题制图智能体.md)，状态为草稿，待确认后开工。
+-   `src/`：目录已就绪，技术选型已定（Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit），源码尚未开始。
 -   远端仓库：`https://github.com/dlg591103-cpu/webgis-twin-lab`（私有），`main` 已推送并跟踪 `origin/main`。
 
 ## 版本管理约定
