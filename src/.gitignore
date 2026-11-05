@@ -1,0 +1,73 @@
+# src/ 仓库忽略规则
+#
+# 技术栈尚未确定，本文件先覆盖与语言无关的通用项，按类别分组。
+# 确定技术方案后，在对应分组内补充栈相关条目（例如具体的依赖目录、构建产物），
+# 已有条目如需删除，先确认它确实不适用于本项目。
+
+# --- 密钥与凭据 ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets/
+.npmrc
+.pypirc
+.htpasswd
+
+# --- 真实用户数据 ---
+# 真实数据不得入库；测试需要的样例请使用脱敏后的固定样本
+data/private/
+data/raw/
+fixtures/private/
+*.dump
+*.sql.gz
+
+# --- 依赖缓存 ---
+node_modules/
+.pnpm-store/
+.yarn/cache/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.gradle/
+.m2/
+.cargo/registry/
+
+# --- 构建结果 ---
+dist/
+build/
+out/
+target/
+bin/
+obj/
+*.class
+*.o
+*.pyc
+
+# --- 日志与临时文件 ---
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+tmp/
+temp/
+.cache/
+.cache-loader/
+coverage/
+
+# --- 编辑器与系统文件 ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
