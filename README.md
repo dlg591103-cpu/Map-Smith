@@ -35,6 +35,7 @@
 -   `src/`：目录已就绪，技术选型已定（Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit），源码尚未开始。
 -   远端仓库：`https://github.com/dlg591103-cpu/webgis-twin-lab`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 -   多人协作：协作模式与协作者（`PINGNINGYI`）已确认，工程规则第 10 节与贡献模板已就绪；仓库可见性、协作者邀请与 `main` 分支保护需在 GitHub 网页执行，执行前不视为已生效。
+-   协作者推送验证：`docs/test-collab` 分支用于验证协作者（`PINGNINGYI`）对远端的推送权限；验证通过后由维护者删除该分支，不并入 `main`。
 
 ## 版本管理约定
 
