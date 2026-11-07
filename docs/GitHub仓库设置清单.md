@@ -24,27 +24,37 @@
 
 完成标志：协作者列表显示 `PINGNINGYI` 已接受邀请。
 
-## 3. 保护 `main` 分支
+## 3. 保护 `main` 分支（Rulesets，2026-11-07 起）
 
-路径：`Settings` → `Branches` → `Add branch protection rule`（新版界面可能叫 `Rules` → `Rulesets`，按实际界面操作）。
+**历史（2026-11-05，经典分支保护）**：曾使用 `Settings` → `Branches` 的经典保护。实测 `PINGNINGYI` 直推 `main` 返回 protected branch / GH006；PR #2 显示 `Merging is blocked`、`1 pending review`。该规则已被下面的 Rulesets 取代，历史记录保留。
 
-分支名模式：`main`。勾选（`[x]` 表示已实测项）：
+### 3.1 目标配置
 
-- [x] `Require a pull request before merging`
-  - [x] `Require approvals` 设为 **1**
-  - [ ] `Dismiss stale pull request approvals when new commits are pushed`
-  - [x] `Require review from Code Owners`（使 `.github/CODEOWNERS` 生效）
-  - [ ] `Require approval of the most recent reviewable push`（可选，建议开启）
-- [ ] `Require conversation resolution before merging`
-- [ ] `Do not allow bypassing the above settings`（包含管理员，避免维护者绕过）
-- [ ] 不勾选 `Allow force pushes`（经典规则没有正向的 `Block force pushes`；不勾选即禁止强推，尚未单独实测）
-- [ ] 不勾选 `Allow deletions`
+路径：`Settings` → `Rules` → `Rulesets` → `New branch ruleset`。
 
-说明：GitHub 免费账户的公开仓库支持经典分支保护；若界面已迁移到 Rulesets，对应选项为 `Require a pull request`、`Required approvals`、`Require review from Code Owners`、`Require conversation resolution`、`Block force pushes`。
+- 名称：`main-protection`
+- `Enforcement status`：`Active`
+- `Target branches`：`Include default branch`
+- 勾选：
+  - `Require a pull request before merging`
+    - `Required approvals`：**1**
+    - `Require review from Code Owners`
+    - `Require conversation resolution`
+  - `Block force pushes`
+  - `Restrict deletions`
+- `Bypass list`：仅添加 `dlg591103-cpu`，bypass mode 选 `Always`
 
-完成标志：本地执行 `git push origin main` 被拒绝（提示 protected branch），而推送任务分支正常。
+### 3.2 执行与验收
 
-实测记录（2026-11-05）：`PINGNINGYI` 直推 `main` 返回 protected branch / GH006；PR #2 显示 `Merging is blocked`、`1 pending review`，并自动请求 `dlg591103-cpu` 作为 code owner。`Dismiss stale`、强制推送与删除的拦截未单独实测。
+- [ ] 新建 Rulesets 并保存为 `Active`
+- [ ] 删除或停用旧的经典分支保护规则，避免双重规则
+- [ ] 验证：`dlg591103-cpu` 的 PR 不经批准即可合并（bypass 生效）
+- [ ] 验证：`PINGNINGYI` 的 PR 仍显示 `1 pending review`
+- [ ] 验证：直推 `main` 仍被拒绝（protected branch / GH006）
+
+完成标志：拥有者可自行合并自己的 PR，其他账号仍被要求批准，直推 `main` 仍被拒绝。
+
+**当前状态（2026-11-07）**：迁移已决定，网页配置由用户执行，尚未实测；实测后在本节下方补记结果。
 
 ## 4. 合并方式
 
