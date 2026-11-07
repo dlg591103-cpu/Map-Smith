@@ -32,7 +32,7 @@
 -   项目骨架已建立并纳入版本控制：`README.md`、`AGENTS.md`、`docs/`、`src/`。
 -   产品事实文档：已建立 8 份（产品定义、范围与边界、架构原则、三 Agent 协议、MapSpec 与工具契约、数据源、制图规范、交付形态），位于 [`docs/facts/`](docs/facts/)。
 -   SPEC：[`docs/Spec/V0.1-专题制图智能体.md`](docs/Spec/V0.1-专题制图智能体.md)，状态为已确认（2026-11-05），按 SPEC 第 6.1 节的任务分支开发。
--   `src/`：目录已就绪，技术选型已定（Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit）。T01–T03 已完成：依赖与锁文件（[`src/requirements.txt`](src/requirements.txt)、[`src/requirements.lock`](src/requirements.lock)）、包骨架与配置、MapSpec 模型与校验（[`src/mapsmith/spec.py`](src/mapsmith/spec.py)）；自检记录见 [`docs/自检/`](docs/自检/)。功能实现自 T04 起。
+-   `src/`：目录已就绪，技术选型已定（Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit）。T01–T04 已完成：依赖与锁文件、包骨架与配置、MapSpec 模型与校验（[`src/mapsmith/spec.py`](src/mapsmith/spec.py)）、投影选带与输出白名单（[`src/mapsmith/projection.py`](src/mapsmith/projection.py)）；自检记录见 [`docs/自检/`](docs/自检/)。数据与渲染功能自 T05 起。
 -   远端仓库：`https://github.com/dlg591103-cpu/webgis-twin-lab`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 -   多人协作：仓库已公开，`PINGNINGYI` 已作为协作者加入并具备 Write 权限；`main` 已启用分支保护（要求 PR、1 个批准、Code Owner 评审、对话解决、禁止强推与删除、不允许绕过）。实测已验证：协作者可推送分支并发起 PR、直推 `main` 被拒绝（protected branch / GH006）、未获批准时合并被阻止。PR 模板自动填充尚待下一次建 PR 时确认。
 
