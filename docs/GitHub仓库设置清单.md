@@ -46,15 +46,19 @@
 
 ### 3.2 执行与验收
 
-- [ ] 新建 Rulesets 并保存为 `Active`
-- [ ] 删除或停用旧的经典分支保护规则，避免双重规则
-- [ ] 验证：`dlg591103-cpu` 的 PR 不经批准即可合并（bypass 生效）
-- [ ] 验证：`PINGNINGYI` 的 PR 仍显示 `1 pending review`
-- [ ] 验证：直推 `main` 仍被拒绝（protected branch / GH006）
+- [x] 新建 Rulesets 并保存为 `Active`
+- [x] 删除或停用旧的经典分支保护规则，避免双重规则
+- [x] 验证：`dlg591103-cpu` 的 PR 勾选 bypass 后可合并（PR #4）
+- [ ] 验证：`PINGNINGYI` 的 PR 仍显示 `1 pending review`（本次未单独实测）
+- [ ] 验证：非 bypass 账号直推 `main` 仍被拒绝（本次未单独实测）
 
 完成标志：拥有者可自行合并自己的 PR，其他账号仍被要求批准，直推 `main` 仍被拒绝。
 
-**当前状态（2026-11-07）**：迁移已决定，网页配置由用户执行，尚未实测；实测后在本节下方补记结果。
+实测记录（2026-11-07）：
+
+- Ruleset `main-protection` 已 `Active`，bypass list 为 `dlg591103-cpu`，模式 `For pull requests only`。
+- PR #4 由 `dlg591103-cpu` 发起，页面显示 `1 pending review`、`Merging is blocked`；勾选 `Merge without waiting for requirements to be met (bypass rules)` 后，`Bypass rules and merge (squash)` 成功，`main` 更新为 `40a680b`。
+- 未单独实测：`PINGNINGYI` 的 PR 被要求批准（PR #4 的 pending review 由 owner 自身触发，可间接说明批准要求仍在）；非 bypass 账号直推 `main` 的拦截。
 
 ## 4. 合并方式
 
