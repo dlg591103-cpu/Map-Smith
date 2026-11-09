@@ -196,17 +196,29 @@ def draw_scale_bar(
 
 
 def draw_north_arrow(ax: Axes) -> None:
-    """指北针（第 4 条）：画在右下角，箭头朝上。"""
+    """指北针（第 4 条）：画在右上角，箭头朝上，「N」标在箭头之上。
+
+    图例固定占右下角（``draw_legend`` 的 ``loc="lower right"``），指北针因此放在右上角，
+    并抬到 ``zorder=6``，避免被图例底框或地图主体压住。
+    """
     ax.annotate(
-        "N",
-        xy=(0.94, 0.18),
-        xytext=(0.94, 0.08),
+        "",
+        xy=(0.94, 0.86),
+        xytext=(0.94, 0.76),
         xycoords="axes fraction",
         textcoords="axes fraction",
+        arrowprops=dict(arrowstyle="-|>", color="black", lw=1.5),
+        zorder=6,
+    )
+    ax.text(
+        0.94,
+        0.875,
+        "N",
+        transform=ax.transAxes,
         ha="center",
         va="bottom",
         fontsize=12,
-        arrowprops=dict(arrowstyle="-|>", color="black", lw=1.5),
+        zorder=6,
     )
 
 

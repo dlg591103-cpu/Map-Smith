@@ -142,6 +142,27 @@ def test_apply_layout_draws_all_elements_and_font() -> None:
     plt.close(fig)
 
 
+def test_north_arrow_sits_clear_of_legend() -> None:
+    """指北针不得与右下角图例重叠（T15 修订：原实现两者同占右下角，产物上箭头被压住）。
+
+    只看 ``report.drawn`` 里有没有「指北针」拦不住这类缺陷，这里按窗口坐标做几何检查。
+    """
+    fig, ax = _figure()
+    apply_layout(fig, ax, make_spec())
+    renderer = fig.canvas.get_renderer()
+
+    legend = ax.get_legend()
+    assert legend is not None
+    n_text = next(t for t in ax.texts if t.get_text() == "N")
+
+    n_box = n_text.get_window_extent(renderer)
+    assert not n_box.overlaps(legend.get_window_extent(renderer))
+
+    ax_box = ax.get_window_extent(renderer)
+    assert n_box.y0 > ax_box.y0 + ax_box.height / 2, "指北针应位于图幅上半部"
+    plt.close(fig)
+
+
 def test_apply_layout_notes_include_source_crs_method_missing() -> None:
     fig, ax = _figure()
     apply_layout(fig, ax, make_spec())
