@@ -22,8 +22,12 @@ def render(spec: MapSpec, gdf: Any, **kwargs: Any) -> Any:
         from .point import render_point
 
         return render_point(spec, gdf, **kwargs)
+    if spec.map_type == "idw":
+        from .idw import render_idw
+
+        return render_idw(spec, gdf, **kwargs)
     raise NotImplementedError(
-        f"图种 {spec.map_type!r} 的渲染尚未实现（当前支持 choropleth / point）"
+        f"图种 {spec.map_type!r} 的渲染尚未实现（当前支持 choropleth / point / idw）"
     )
 
 

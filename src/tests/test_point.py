@@ -245,8 +245,8 @@ def test_render_dispatches_by_map_type() -> None:
 
 def test_render_unimplemented_map_type_raises() -> None:
     spec = make_point_spec(
-        map_type="idw",
-        layers=[Layer(id="data", kind="idw", field="pm25")],
+        map_type="buffer",
+        layers=[Layer(id="data", kind="buffer", field="pm25")],
     )
     with pytest.raises(NotImplementedError, match="尚未实现"):
         render(spec, make_point_gdf([30, 45]))
