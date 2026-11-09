@@ -1,6 +1,6 @@
 # 审图员自检记录（SPEC T19 / 需求单 T12 Reviewer）
 
-> 记录对象：`feat/reviewer-qacheck` 分支固定提交（提交 SHA 见 PR 与本节末尾）。
+> 记录对象：`feat/reviewer-qacheck` 分支固定提交 `74616bf`（本记录随后续 docs 提交入库，代码与测试以 `74616bf` 为准）。
 > 自检执行者：AI 开发会话。独立验收：待验收。
 
 ## 1. 环境
@@ -27,9 +27,6 @@ python -m pytest tests/test_reviewer.py -q
 8. `fix_spec_patch` 可应用后通过审查
 9. reviewer 输出包含 `passed/round/issues/summary`
 
-```powershell
-python -m pytest tests/test_reviewer.py -q
-```
 
 ## 3. 未验证范围
 
@@ -42,4 +39,4 @@ python -m pytest tests/test_reviewer.py -q
 
 确定性规则引擎可独立运行；reviewer 满足「最多 2 轮否决 + 第 2 轮附意见出图」契约；pytest 通过。
 
-- 固定提交：`<提交 SHA 见 PR>`
+- 固定提交：`74616bf`（`feat: 新增审图员 qa_check 十规则与返工契约`）
