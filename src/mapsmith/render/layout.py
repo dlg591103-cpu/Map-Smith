@@ -146,8 +146,18 @@ def draw_title(ax: Axes, spec: MapSpec) -> None:
     ax.set_title(spec.title)
 
 
-def draw_legend(ax: Axes, spec: MapSpec, *, unit: str | None = None) -> None:
-    """图例（第 2 条：分级断点与单位；第 6 条：分级方法注明）。"""
+def draw_legend(
+    ax: Axes,
+    spec: MapSpec,
+    *,
+    unit: str | None = None,
+    anchor: tuple[float, float] | None = None,
+) -> None:
+    """图例（第 2 条：分级断点与单位；第 6 条：分级方法注明）。
+
+    ``anchor`` 给出时用 `bbox_to_anchor` 把图例放到坐标轴外（choropleth 的主体占满图幅，
+    图例放进去会压住面要素），缺省仍留在右下角。
+    """
     classification = spec.classification
     if classification is None:
         return
@@ -160,6 +170,9 @@ def draw_legend(ax: Axes, spec: MapSpec, *, unit: str | None = None) -> None:
     title = classification_note(spec)
     if unit:
         title += f"（单位：{unit}）"
+    if anchor is not None:
+        ax.legend(handles=patches, loc="upper left", bbox_to_anchor=anchor, title=title)
+        return
     ax.legend(handles=patches, loc="lower right", title=title)
 
 
@@ -256,6 +269,7 @@ def apply_layout(
     *,
     extent_m: tuple[float, float, float, float] | None = None,
     unit: str | None = None,
+    legend_anchor: tuple[float, float] | None = None,
 ) -> LayoutReport:
     """按 spec.layout 的标志补齐版式要素，并加载中文字体。
 
@@ -270,7 +284,7 @@ def apply_layout(
     report.drawn.append("图名")
 
     if spec.layout.legend and spec.classification is not None:
-        draw_legend(ax, spec, unit=unit)
+        draw_legend(ax, spec, unit=unit, anchor=legend_anchor)
         report.drawn.append("图例")
 
     if spec.layout.scale_bar:
