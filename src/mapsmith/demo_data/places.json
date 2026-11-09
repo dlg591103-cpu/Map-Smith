@@ -1,0 +1,182 @@
+{
+  "version": "2026-11-09",
+  "source": "离线最小索引：adcode 为国家行政区划代码；完整清单应取自 DataV GeoAtlas areas_v3/bound/all.json（未在本机验证，沙箱出站被拦截）",
+  "crs_note": "DataV 边界数据来源于高德开放平台，坐标系疑为 GCJ-02，尚未在本机实测偏移",
+  "places": [
+    {
+      "name": "江苏省",
+      "full_name": "江苏省",
+      "adcode": "320000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "南京",
+      "full_name": "南京市",
+      "adcode": "320100",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "无锡",
+      "full_name": "无锡市",
+      "adcode": "320200",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "徐州",
+      "full_name": "徐州市",
+      "adcode": "320300",
+      "level": "city",
+      "parent": "江苏省",
+      "bbox": [
+        116.3571,
+        33.7123,
+        118.6687,
+        34.9758
+      ],
+      "bbox_source": "本地边界 320300_full.json 纠偏后实测（2026-11-09）"
+    },
+    {
+      "name": "常州",
+      "full_name": "常州市",
+      "adcode": "320400",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "苏州",
+      "full_name": "苏州市",
+      "adcode": "320500",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "南通",
+      "full_name": "南通市",
+      "adcode": "320600",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "连云港",
+      "full_name": "连云港市",
+      "adcode": "320700",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "淮安",
+      "full_name": "淮安市",
+      "adcode": "320800",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "盐城",
+      "full_name": "盐城市",
+      "adcode": "320900",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "扬州",
+      "full_name": "扬州市",
+      "adcode": "321000",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "镇江",
+      "full_name": "镇江市",
+      "adcode": "321100",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "泰州",
+      "full_name": "泰州市",
+      "adcode": "321200",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "宿迁",
+      "full_name": "宿迁市",
+      "adcode": "321300",
+      "level": "city",
+      "parent": "江苏省"
+    },
+    {
+      "name": "鼓楼区",
+      "full_name": "鼓楼区",
+      "adcode": "320302",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "云龙区",
+      "full_name": "云龙区",
+      "adcode": "320303",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "贾汪区",
+      "full_name": "贾汪区",
+      "adcode": "320305",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "泉山区",
+      "full_name": "泉山区",
+      "adcode": "320311",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "铜山区",
+      "full_name": "铜山区",
+      "adcode": "320312",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "丰县",
+      "full_name": "丰县",
+      "adcode": "320321",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "沛县",
+      "full_name": "沛县",
+      "adcode": "320322",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "睢宁县",
+      "full_name": "睢宁县",
+      "adcode": "320324",
+      "level": "district",
+      "parent": "徐州市"
+    },
+    {
+      "name": "新沂",
+      "full_name": "新沂市",
+      "adcode": "320381",
+      "level": "county_city",
+      "parent": "徐州市"
+    },
+    {
+      "name": "邳州",
+      "full_name": "邳州市",
+      "adcode": "320382",
+      "level": "county_city",
+      "parent": "徐州市"
+    }
+  ]
+}
