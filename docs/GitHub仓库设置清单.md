@@ -96,6 +96,12 @@
 - 直推 `main`：返回 protected branch / GH006，拒绝成功。
 - 未验证：PR 模板自动填充；协作者 PR 获批后 Squash 合并（PR #1 由维护者本人发起）。
 
+记录（2026-11-10）：
+
+- PR #8（T12 审图员，源分支 `feat/reviewer-qacheck`）：分支基线停在 `15af002`（2026-11-05），此后 `main` 已合入 PR #4–#7。PR 页面列出 4 个冲突文件：`README.md`（content 冲突）、`src/mapsmith/__init__.py`、`src/mapsmith/agents/__init__.py`、`src/mapsmith/tools/__init__.py`（后三者均为 add/add），并提示须先解决冲突才能继续。本地 `git merge origin/main` 解决 4 处冲突、全套测试通过后推送 `2623b8d`，PR 冲突提示消除，随后以 Squash 合并为 `0b9063d`。
+- 冲突分支能否用 bypass 跳过：未单独实测。解决前 PR 页面仅显示灰色 `Squash and merge` 与 `Merging is blocked` 提示。
+- PR #9（规则第 1 节补充，源分支 `docs/branch-sync-rule`）：仅改 `docs/工程规则.md`（+2 行），以 Squash 合并为 `b996fa0`。`CODEOWNERS` 中 `/docs/` 仅 `dlg591103-cpu`，而该 PR 由同一账号发起，GitHub 不允许批准自己的 PR；合并时的批准方式未记录。
+
 ## 7. 常见问题
 
 | 现象 | 原因 | 处理 |
