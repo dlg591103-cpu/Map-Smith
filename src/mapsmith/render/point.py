@@ -27,10 +27,12 @@ from matplotlib.lines import Line2D
 from ..io.models import DataError
 from ..spec import MapSpec
 from .choropleth import _aspect_for, _transformed_extent, class_index
+from .extent import drawing_extent
 from .layout import (
     LayoutReport,
     apply_layout,
     legend_labels,
+    metric_extent,
     palette_colors,
 )
 
@@ -174,6 +176,7 @@ def render_point(
     label_field: str | None = None,
     unit: str | None = None,
     out_path: str | Path | None = None,
+    pdf_path: str | Path | None = None,
 ) -> PointReport:
     """渲染一张点图 / 气泡图（不画坐标轴，版式要素由 `apply_layout` 补齐）。
 
@@ -241,9 +244,21 @@ def render_point(
 
     ax.set_aspect(_aspect_for(spec.crs, spec.extent.bbox))
     ax.set_axis_off()
-    minx, miny, maxx, maxy = _transformed_extent(spec)
+    # 取景范围按站点实际分布收窄，避免稀疏站点挤在行政区全幅正中的一小团。
+    content_bounds = None if frame.empty else tuple(float(v) for v in frame.total_bounds)
+    minx, miny, maxx, maxy = drawing_extent(spec, content_bounds=content_bounds)
     ax.set_xlim(minx, maxx)
     ax.set_ylim(miny, maxy)
+
+    # 取景范围明显小于 extent 时，注记说明站点只覆盖局部（渲染层补充说明，不改 spec.notes）。
+    extra_note: str | None = None
+    extent_full = _transformed_extent(spec)
+    extent_w = extent_full[2] - extent_full[0]
+    draw_w = maxx - minx
+    if extent_w > 0 and draw_w < extent_w * 0.3:
+        draw_m = metric_extent((minx, miny, maxx, maxy), source_crs=str(spec.crs))
+        km = (draw_m[2] - draw_m[0]) / 1000.0
+        extra_note = f"注记：站点仅覆盖图幅局部，范围约 {km:g} km"
 
     # --- 标注 ---
     if label_field is not None and spec.annotation.show:
@@ -275,7 +290,7 @@ def render_point(
         ax.add_artist(size_legend)
 
     # --- 版式要素 + 断点图例 ---
-    layout = apply_layout(fig, ax, spec, unit=unit, legend_anchor=(1.02, 1.0))
+    layout = apply_layout(fig, ax, spec, unit=unit, legend_anchor=(1.02, 1.0), extra_note=extra_note)
 
     # 版式注记下移到图框正下方（与 choropleth 一致的留白处理）。
     fig.canvas.draw()
@@ -286,6 +301,8 @@ def render_point(
 
     if out_path is not None:
         fig.savefig(out_path, dpi=spec.layout.dpi, bbox_inches="tight")
+    if pdf_path is not None:
+        fig.savefig(pdf_path, dpi=spec.layout.dpi, bbox_inches="tight")
 
     drawn = len(values) - size_result.missing_count
     summary = (
