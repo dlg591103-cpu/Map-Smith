@@ -21,9 +21,9 @@
 技术选型为 Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit；源码尚未落地前，以 `src/` 下实际依赖声明为准。
 
 ```powershell
-git clone https://github.com/<你的 GitHub 用户名>/webgis-twin-lab.git
-cd webgis-twin-lab
-git remote add upstream https://github.com/dlg591103-cpu/webgis-twin-lab.git
+git clone https://github.com/<你的 GitHub 用户名>/Map-Smith.git
+cd Map-Smith
+git remote add upstream https://github.com/dlg591103-cpu/Map-Smith.git
 git fetch upstream
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
