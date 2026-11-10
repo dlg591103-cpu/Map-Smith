@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 贡献指南
-    url: https://github.com/dlg591103-cpu/webgis-twin-lab/blob/main/CONTRIBUTING.md
+    url: https://github.com/dlg591103-cpu/Map-Smith/blob/main/CONTRIBUTING.md
     about: 提交代码或文档前，先阅读分支、自检与 PR 流程
   - name: 工程规则
-    url: https://github.com/dlg591103-cpu/webgis-twin-lab/blob/main/docs/%E5%B7%A5%E7%A8%8B%E8%A7%84%E5%88%99.md
+    url: https://github.com/dlg591103-cpu/Map-Smith/blob/main/docs/%E5%B7%A5%E7%A8%8B%E8%A7%84%E5%88%99.md
     about: 分支与基线、交付、验收、合并的强制要求

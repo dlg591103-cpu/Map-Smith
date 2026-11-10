@@ -33,7 +33,7 @@
 -   产品事实文档：已建立 8 份（产品定义、范围与边界、架构原则、三 Agent 协议、MapSpec 与工具契约、数据源、制图规范、交付形态），位于 [`docs/facts/`](docs/facts/)。
 -   SPEC：[`docs/Spec/V0.1-专题制图智能体.md`](docs/Spec/V0.1-专题制图智能体.md)，状态为已确认（2026-11-05），按 SPEC 第 6.1 节的任务分支开发。
 -   `src/`：目录已就绪，技术选型已定（Python 3.12 + geopandas / matplotlib / mapclassify / Streamlit）。T01–T04 已完成：依赖与锁文件、包骨架与配置、MapSpec 模型与校验（[`src/mapsmith/spec.py`](src/mapsmith/spec.py)）、投影选带与输出白名单（[`src/mapsmith/projection.py`](src/mapsmith/projection.py)）；自检记录见 [`docs/自检/`](docs/自检/)。数据与渲染功能自 T05 起。
--   远端仓库：`https://github.com/dlg591103-cpu/webgis-twin-lab`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+-   远端仓库：`https://github.com/dlg591103-cpu/Map-Smith`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 -   多人协作：仓库已公开，`PINGNINGYI` 已作为协作者加入并具备 Write 权限。`main` 已启用 Rulesets 保护（要求 PR、1 个批准、Code Owner 评审、禁止强推与删除）；bypass list 仅含仓库拥有者 `dlg591103-cpu`（`For pull requests only`），拥有者可自行合并自己的 PR，其余账号仍需批准。实测：PR #4 经 bypass 以 Squash 合并，`main` 为 `40a680b`。经典保护下已实测：协作者可推送分支并发起 PR、直推 `main` 被拒绝（protected branch / GH006）、未获批准时合并被阻止。PR 模板自动填充尚待下一次建 PR 时确认。
 -   审图员（SPEC T19 / 需求单 T12 Reviewer）：`tools/qa_check.py` 十条硬规则、`agents/reviewer.py` 返工契约、`kb/reviewer_rules.json` 与审图 prompt 已完成，自检见 [`docs/自检/T19-reviewer-自检记录.md`](docs/自检/T19-reviewer-自检记录.md)。
 
