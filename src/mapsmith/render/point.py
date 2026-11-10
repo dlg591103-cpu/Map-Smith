@@ -30,6 +30,8 @@ from .choropleth import _aspect_for, _transformed_extent, class_index
 from .extent import drawing_extent
 from .layout import (
     LayoutReport,
+    _POINT_NORTH_ARROW_CANDIDATES,
+    _place_labels_avoiding_overlap,
     apply_layout,
     legend_labels,
     metric_extent,
@@ -262,8 +264,9 @@ def render_point(
 
     # --- 标注 ---
     if label_field is not None and spec.annotation.show:
-        for xi, yi, text in zip(x, y, frame[label_field].astype(str)):
-            ax.annotate(str(text), (xi, yi), textcoords="offset points", xytext=(5, 5), fontsize=8)
+        label_coords = [(float(xi), float(yi)) for xi, yi in zip(x, y)]
+        label_texts = [str(t) for t in frame[label_field].astype(str)]
+        _place_labels_avoiding_overlap(ax, label_coords, label_texts)
 
     # --- 气泡大小三级图例（先画并 add_artist，让 apply_layout 的断点图例成为主图例）---
     if (
@@ -290,7 +293,15 @@ def render_point(
         ax.add_artist(size_legend)
 
     # --- 版式要素 + 断点图例 ---
-    layout = apply_layout(fig, ax, spec, unit=unit, legend_anchor=(1.02, 1.0), extra_note=extra_note)
+    layout = apply_layout(
+        fig,
+        ax,
+        spec,
+        unit=unit,
+        legend_anchor=(1.02, 1.0),
+        extra_note=extra_note,
+        north_arrow_candidates=_POINT_NORTH_ARROW_CANDIDATES,
+    )
 
     # 版式注记下移到图框正下方（与 choropleth 一致的留白处理）。
     fig.canvas.draw()

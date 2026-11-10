@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import math
+
 from ..spec import MapSpec
-from .choropleth import _transformed_extent
+from .choropleth import _aspect_for, _transformed_extent
 
 
 def drawing_extent(
@@ -28,6 +30,8 @@ def drawing_extent(
       保证不越出图幅。
     - 内容退化（零面积，或宽高都相对 extent 小于 ``min_ratio``）时回退到 extent，
       不崩、不发散成无穷大。
+    - aspect-aware：在 pad 扩展后，按 ``set_aspect`` 修正后的像素空间宽高比与
+      图幅宽高比做对称补偿，使取景范围在像素空间与图幅比例匹配，避免一侧留大片空白。
     """
     extent = _transformed_extent(spec)
     if content_bounds is None:
@@ -42,10 +46,8 @@ def drawing_extent(
     cminx, cminy, cmaxx, cmaxy = content_bounds
     cw = cmaxx - cminx
     ch = cmaxy - cminy
-    # 零面积（单点 / 共线点）回退。
     if cw <= 0 or ch <= 0:
         return extent
-    # 内容相对 extent 过小（近退化），回退避免取景范围发散。
     if cw / ew < min_ratio and ch / eh < min_ratio:
         return extent
 
@@ -55,6 +57,28 @@ def drawing_extent(
     dmaxx = min(cmaxx + padx, emaxx)
     dminy = max(cminy - pady, eminy)
     dmaxy = min(cmaxy + pady, emaxy)
+
+    if dmaxx <= dminx or dmaxy <= dminy:
+        return extent
+
+    aspect = _aspect_for(spec.crs, spec.extent.bbox)
+    figsize = spec.layout.size
+    fig_ratio = figsize[0] / figsize[1]
+
+    dw = dmaxx - dminx
+    dh = dmaxy - dminy
+    draw_pixel_ratio = (dw * aspect) / dh
+
+    if draw_pixel_ratio > fig_ratio:
+        target_dh = (dw * aspect) / fig_ratio
+        extra = (target_dh - dh) / 2.0
+        dminy = max(dminy - extra, eminy)
+        dmaxy = min(dmaxy + extra, emaxy)
+    elif draw_pixel_ratio < fig_ratio:
+        target_dw = (dh * fig_ratio) / aspect
+        extra = (target_dw - dw) / 2.0
+        dminx = max(dminx - extra, eminx)
+        dmaxx = min(dmaxx + extra, emaxx)
 
     if dmaxx <= dminx or dmaxy <= dminy:
         return extent
