@@ -235,9 +235,13 @@ def draw_north_arrow(ax: Axes) -> None:
     )
 
 
-def draw_notes(fig: Figure, spec: MapSpec) -> None:
+def draw_notes(fig: Figure, spec: MapSpec, *, extra_note: str | None = None) -> None:
     """底部注记：数据来源与更新时间（第 5 条）、坐标系（第 7 条）、
-    分级方法（第 6 条）、缺失值说明（第 10 条）。均只读取 MapSpec。"""
+    分级方法（第 6 条）、缺失值说明（第 10 条）。均只读取 MapSpec。
+
+    ``extra_note`` 是渲染层补齐的说明（如「站点仅覆盖图幅局部」），追加在 spec 注记
+    之后；只做说明，不改变 spec.notes 的语义。
+    """
     lines: list[str] = []
     if spec.layout.source_note:
         lines.append(spec.data_source_note)
@@ -247,6 +251,8 @@ def draw_notes(fig: Figure, spec: MapSpec) -> None:
         lines.append(f"分级方法：{classification_note(spec)}")
     if spec.notes:
         lines.append("缺失值说明：" + "；".join(spec.notes))
+    if extra_note:
+        lines.append(extra_note)
     if lines:
         fig.text(0.01, 0.01, "\n".join(lines), ha="left", va="bottom", fontsize=7, linespacing=1.5)
 
@@ -270,12 +276,14 @@ def apply_layout(
     extent_m: tuple[float, float, float, float] | None = None,
     unit: str | None = None,
     legend_anchor: tuple[float, float] | None = None,
+    extra_note: str | None = None,
 ) -> LayoutReport:
     """按 spec.layout 的标志补齐版式要素，并加载中文字体。
 
     - 图名、分级方法、配色、缺失值说明只读取 MapSpec，不代填。
     - 比例尺 / 指北针 / 来源注记 / 坐标注记由渲染层补齐。
     - `extent_m` 未给时按 spec.extent.bbox 自动换算米制范围。
+    - `extra_note` 是渲染层补充说明，追加进底部注记，不改变 spec.notes 语义。
     """
     font = load_chinese_font()
     report = LayoutReport(font=font)
@@ -301,7 +309,7 @@ def apply_layout(
         draw_north_arrow(ax)
         report.drawn.append("指北针")
 
-    draw_notes(fig, spec)
+    draw_notes(fig, spec, extra_note=extra_note)
     report.drawn.append("注记")
 
     report.summary = "版式要素已补齐：" + "、".join(report.drawn) + f"；中文字体 {font}。"
