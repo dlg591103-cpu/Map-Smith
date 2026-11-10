@@ -15,6 +15,8 @@
 python -m pytest tests/test_reviewer.py -q
 ```
 
+> 2026-11-10 起该用例随测试目录统一移入 `src/tests/test_reviewer.py`，现行命令为 `python -m pytest -c src/pytest.ini -q`。
+
 结果：全部通过（9 个用例）。覆盖：
 
 1. 合规 spec → `passed=true`
