@@ -174,6 +174,7 @@ def render_point(
     label_field: str | None = None,
     unit: str | None = None,
     out_path: str | Path | None = None,
+    pdf_path: str | Path | None = None,
 ) -> PointReport:
     """渲染一张点图 / 气泡图（不画坐标轴，版式要素由 `apply_layout` 补齐）。
 
@@ -286,6 +287,8 @@ def render_point(
 
     if out_path is not None:
         fig.savefig(out_path, dpi=spec.layout.dpi, bbox_inches="tight")
+    if pdf_path is not None:
+        fig.savefig(pdf_path, dpi=spec.layout.dpi, bbox_inches="tight")
 
     drawn = len(values) - size_result.missing_count
     summary = (

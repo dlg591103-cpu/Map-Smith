@@ -128,6 +128,7 @@ def render_choropleth(
     field: str | None = None,
     unit: str | None = None,
     out_path: str | Path | None = None,
+    pdf_path: str | Path | None = None,
 ) -> ChoroplethReport:
     """渲染一张分级设色地图（不画坐标轴，版式要素由 `apply_layout` 补齐）。
 
@@ -171,6 +172,8 @@ def render_choropleth(
 
     if out_path is not None:
         fig.savefig(out_path, dpi=spec.layout.dpi, bbox_inches="tight")
+    if pdf_path is not None:
+        fig.savefig(pdf_path, dpi=spec.layout.dpi, bbox_inches="tight")
 
     drawn = sum(counts)
     summary = (
