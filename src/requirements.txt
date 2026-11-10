@@ -1,0 +1,17 @@
+# Map Smith V0.1 顶层依赖
+# 运行时与自检依赖分开列出，锁文件 requirements.lock 由此文件解析生成。
+# Python 3.12；解释器与虚拟环境路径见 docs/Spec/V0.1-专题制图智能体.md 第 5 节。
+
+# --- 运行时 ---
+pandas>=2.2,<3.0
+geopandas>=1.0,<2.0
+shapely>=2.0,<3.0
+pyproj>=3.6,<4.0
+mapclassify>=2.6,<3.0
+matplotlib>=3.8,<4.0
+pydantic>=2.7,<3.0
+streamlit>=1.36,<2.0
+requests>=2.31,<3.0
+
+# --- 测试与自检 ---
+pytest>=8.0,<9.0
