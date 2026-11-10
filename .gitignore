@@ -41,7 +41,10 @@ __pycache__/
 .cargo/registry/
 
 # --- 构建结果 ---
+# web/dist 是交付物（不需要 Node 即可运行），单独放行；其余构建目录仍忽略。
 dist/
+!web/dist/
+!web/dist/**
 build/
 out/
 target/

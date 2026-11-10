@@ -1,4 +1,4 @@
-"""T22 界面骨架的纯函数层：无 streamlit 依赖，可单测。
+"""T22 界面的纯函数层：无前端依赖，可单测。
 
 职责：
 - `build_spec`：把表单值组装成合法 MapSpec；非法组合抛带中文说明的 `DataError`。
@@ -7,7 +7,7 @@
 - `aggregate_points_to_admin`：把站点值按空间归属聚合到边界面（供 choropleth）。
 - `run_render`：分派渲染并落盘 PNG + PDF。
 
-Streamlit 组件难测，这里只放可单测的纯函数；控件与状态全部在 `app.py`。
+界面在 `web/`（Vue 3 + Vite）；这里只放可单测的计算与渲染分派。
 """
 
 from __future__ import annotations
