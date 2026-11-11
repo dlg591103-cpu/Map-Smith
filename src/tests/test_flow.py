@@ -269,8 +269,8 @@ def test_to_mapspec_filters_review_patch_fields():
 
     restored = flow._to_mapspec(data)
     assert restored.classification is not None
-    assert not hasattr(restored.classification, "unit")
-    assert restored.palette.scheme == "YlOrRd"
+    assert restored.classification.unit == "μg/m³"
+    assert restored.palette.scheme == "AQI6"
 
 
 # --- 加载 -----------------------------------------------------------------
@@ -335,8 +335,16 @@ class FakeRender:
         self.tmp_path = tmp_path
         self.calls: list[Any] = []
 
-    def __call__(self, spec, gdf, out_dir, *, name="map"):
-        self.calls.append({"spec": spec, "rows": len(gdf), "out_dir": Path(out_dir), "name": name})
+    def __call__(self, spec, gdf, out_dir, *, name="map", **kwargs):
+        self.calls.append(
+            {
+                "spec": spec,
+                "rows": len(gdf),
+                "out_dir": Path(out_dir),
+                "name": name,
+                "background": kwargs.get("background_gdf") is not None,
+            }
+        )
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         png = out / f"{name}.png"
@@ -439,3 +447,27 @@ def test_run_one_sentence_reject_returns_needs_input(monkeypatch, tmp_path: Path
 
     assert run.result.status == "needs_input"
     assert run.result.decision == "reject"
+
+
+def test_compose_spec_forces_aqi_national_six_classes():
+    loaded = make_loaded()
+    points = loaded["points"]
+    points.gdf["AQI"] = [45.0, 58.0, 120.0, 210.0, 320.0]
+    loaded["layer"] = points
+    loaded["field"] = "AQI"
+
+    spec = flow._compose_spec(
+        request(metric="AQI"),
+        loaded,
+        {"classification": {"method": "quantile", "n": 3}, "palette": {"scheme": "YlOrRd"}},
+    )
+
+    assert spec.classification is not None
+    assert spec.classification.method == "custom"
+    assert spec.classification.n == 6
+    assert spec.classification.breaks == [50.0, 100.0, 150.0, 200.0, 300.0, None]
+    assert spec.classification.unit == "无量纲"
+    assert spec.palette.scheme == "AQI6"
+
+    verdict = flow.review_fn(spec, png="not-none")
+    assert verdict["passed"] is True

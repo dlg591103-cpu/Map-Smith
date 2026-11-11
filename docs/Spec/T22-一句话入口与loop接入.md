@@ -452,3 +452,29 @@ SSE 错误不抛裸 traceback；服务端日志只记录 `request_id`、阶段�
 4. ~~流式~~ → 已确认（2026-11-10）：SSE 阶段流。
 5. ~~是否接受本段把 `streamlit` 从依赖中移除~~ → 已确认（2026-11-10）：移除，`docs/自检/T01` 版本清单同步注明。
 6. ~~是否接受 `python -m mapsmith` 默认启动 Web 服务~~ → 已确认（2026-11-10）：默认启动 Web，`--config` 行为不变。
+
+## 13. 合并前补做项（2026-11-10 追加）
+
+用户要求以下四项完成后才能合并；本节优先于第 11 节「明确未做」中的对应条目。
+
+| 项 | 要改什么 | 验收 |
+| --- | --- | --- |
+| 真实模型 | 配置 `MAPSMITH_LLM_*`，用真实模型跑一次一句话链路 | 解析、制图、出图、审查均成功；记录模型名与耗时，不记录 Key |
+| 点图缺口 | `render/point.py` 叠加城市面底色；指北针移到图框外，避开数据点 | 出图可见行政区轮廓；指北针不与气泡/图例重叠 |
+| AQI 配色 | `render/layout.py` 支持 `AQI6` 国标六级色阶；`flow` 对 AQI 强制六级固定断点与配色 | AQI 出图无 R02/R06/R08 fail |
+| 前端 E2E | 新增 `web/e2e/` 与 Playwright 配置；覆盖页面、表单出图、下载、附件 CRS、未配置提示 | `npx playwright test` 通过；浏览器二进制不入库 |
+
+### 13.1 接口调整
+
+- `MapSpec.Classification` 增加可选 `unit` 字段（默认 `None`），用于审查 R02 读取图例单位；不改变已有字段语义。
+- `ui.build_spec` 接受 `unit` 并写入 `Classification.unit`。
+- `ui.run_render` 增加可选 `background_gdf`，仅 point 图种使用；其他图种忽略。
+- `render_point` 增加可选 `background_gdf`；`PointReport` 增加 `background: bool`。
+- `apply_layout` 增加可选 `north_arrow_anchor`；点图传图框外坐标，其他图种保持默认。
+- `flow` 对 `field == "AQI"` 强制 `method="custom"`、`n=6`、断点 `[50,100,150,200,300,None]`、`palette="AQI6"`、`unit="无量纲"`。
+
+### 13.2 明确不做
+
+- 不引入前端组件库或状态管理库。
+- 不把 Playwright 浏览器二进制提交入库。
+- 不记录真实 API Key；验证只在当前进程环境变量中生效。

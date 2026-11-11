@@ -153,6 +153,7 @@ class PointReport:
     missing_count: int = 0
     crs: str = ""
     summary: str = ""
+    background: bool = False
 
 
 def _size_handle(area: float) -> Line2D:
@@ -175,12 +176,14 @@ def render_point(
     field: str | None = None,
     label_field: str | None = None,
     unit: str | None = None,
+    background_gdf: Any = None,
     out_path: str | Path | None = None,
     pdf_path: str | Path | None = None,
 ) -> PointReport:
     """渲染一张点图 / 气泡图（不画坐标轴，版式要素由 `apply_layout` 补齐）。
 
     - ``gdf`` 需带坐标系，几何为 Point。
+    - ``background_gdf`` 可选面图层（如行政边界），画成浅灰底色，避免点图落在空白图上。
     - ``field`` 缺省取 spec 里 kind=point 图层的 field；气泡面积按该字段线性映射。
     - ``label_field`` 缺省取 `spec.annotation.label_field`；标注文本取该列原值。
     - 缺测点画灰色空心点并计入 `missing_count`。
@@ -215,6 +218,22 @@ def render_point(
 
     # --- 画点 ---
     fig, ax = plt.subplots(figsize=spec.layout.size)
+    background_drawn = False
+    if background_gdf is not None and getattr(background_gdf, "empty", True) is False:
+        if getattr(background_gdf, "crs", None) is not None:
+            background = (
+                background_gdf.to_crs(spec.crs)
+                if str(background_gdf.crs) != str(spec.crs)
+                else background_gdf
+            )
+            background.plot(
+                ax=ax,
+                facecolor="#e9eef4",
+                edgecolor="#b9c3cf",
+                linewidth=0.7,
+                zorder=0,
+            )
+            background_drawn = True
     x = np.asarray(frame.geometry.x, dtype=float)
     y = np.asarray(frame.geometry.y, dtype=float)
     missing_arr = np.asarray(size_result.missing_mask, dtype=bool)
@@ -290,7 +309,16 @@ def render_point(
         ax.add_artist(size_legend)
 
     # --- 版式要素 + 断点图例 ---
-    layout = apply_layout(fig, ax, spec, unit=unit, legend_anchor=(1.02, 1.0), extra_note=extra_note)
+    # 指北针移到图框外右侧，避免收窄取景后数据点落在右上角与指北针重叠。
+    layout = apply_layout(
+        fig,
+        ax,
+        spec,
+        unit=unit,
+        legend_anchor=(1.02, 1.0),
+        north_arrow_anchor=(-0.12, 0.95),
+        extra_note=extra_note,
+    )
 
     # 版式注记下移到图框正下方（与 choropleth 一致的留白处理）。
     fig.canvas.draw()
@@ -317,4 +345,5 @@ def render_point(
         missing_count=size_result.missing_count,
         crs=str(spec.crs),
         summary=summary,
+        background=background_drawn,
     )

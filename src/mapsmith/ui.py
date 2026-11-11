@@ -124,6 +124,7 @@ def build_spec(fields: dict[str, Any]) -> MapSpec:
                 method=method,  # type: ignore[arg-type]
                 n=n,
                 breaks=breaks,
+                unit=fields.get("unit"),
             ),
             palette=Palette(
                 scheme=str(fields.get("palette_scheme", "YlOrRd")),
@@ -209,10 +210,12 @@ def run_render(
     out_dir: str | Path,
     *,
     name: str = "map",
+    background_gdf: Any = None,
 ) -> RenderResult:
     """按 `spec.map_type` 分派渲染，把 PNG 与 PDF 落盘到 `out_dir`，返回路径与报告。
 
     `layer` 可以是 `DataLayer`（取 `.gdf`）或直接 GeoDataFrame。
+    `background_gdf` 仅点图使用，作为城市面底色；其他图种忽略。
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -223,5 +226,11 @@ def run_render(
     if gdf is None:
         raise DataError("图层没有几何数据，无法渲染")
 
-    report = render(spec, gdf, out_path=png_path, pdf_path=pdf_path)
+    report = render(
+        spec,
+        gdf,
+        out_path=png_path,
+        pdf_path=pdf_path,
+        background_gdf=background_gdf,
+    )
     return RenderResult(png_path=png_path, pdf_path=pdf_path, report=report)

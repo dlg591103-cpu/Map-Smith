@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Mapping
 
 import requests
@@ -55,6 +56,11 @@ def _parse_content(content: Any) -> dict[str, Any]:
     if not isinstance(content, str) or not content.strip():
         raise LLMError("模型返回内容为空")
     text = _strip_fence(content)
+    if not text.startswith("{"):
+        # 兼容模型在自然语言里夹带 JSON 的情况；找不到对象则按原样报错。
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            text = match.group(0)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -94,6 +100,7 @@ def chat_json(
             },
         ],
         "temperature": 0,
+        "response_format": {"type": "json_object"},
     }
     headers = {
         "Authorization": f"Bearer {current.llm_api_key}",

@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import matplotlib
+
+matplotlib.use("Agg")
+
 import pandas as pd
 
 from .agents.llm import LLMError, default_llm_callable
@@ -65,6 +68,12 @@ METRIC_UNITS: dict[str, str] = {
     "CO_24h": "mg/m³",
     "AQI": "",
 }
+
+# AQI 是国标强制项：固定六级断点与国标色阶，不接受模型或表单改级数。
+AQI_BREAKS: list[float | None] = [50.0, 100.0, 150.0, 200.0, 300.0, None]
+AQI_SCHEME = "AQI6"
+AQI_UNIT = "无量纲"
+AQI_SCHEMES = {"aqi6", "aqi", "cn_aqi", "china_aqi", "national_aqi"}
 
 # 统一按「去掉点、下划线、空格、连字符」后的小写做键，PM2.5 / pm2_5 / PM2_5_24h 都能命中。
 _METRIC_ALIASES: dict[str, str] = {
@@ -215,6 +224,13 @@ def parse_request(text: str, llm_callable: Callable[[str, Mapping[str, Any]], An
     payload = {
         "user_text": str(text).strip(),
         "known_fields": {"place": "", "time": "", "metric": ""},
+        "output_schema": {
+            "place": "区域名称，缺项填空字符串",
+            "time": "YYYY-MM-DD，缺项填空字符串",
+            "metric": "PM2.5 / PM10 / NO2 / SO2 / O3 / CO / AQI，缺项填空字符串",
+            "questions": ["最多两条向用户的反问"],
+        },
+        "format_instruction": "只返回一个 JSON 对象，不要 Markdown 表格、代码围栏或解释文字。",
     }
     raw = llm_callable(load_prompt("data_steward"), payload)
     if not isinstance(raw, Mapping):
@@ -431,10 +447,28 @@ def _palette_from(draft_palette: Any) -> tuple[str, bool, str | None]:
     return scheme, bool(palette.get("reverse", False)), note
 
 
-def _annotation_from(draft_annotation: Any) -> tuple[str | None, bool]:
+LABEL_ALIASES = {
+    "站点名": "station_name",
+    "站点名称": "station_name",
+    "名称": "station_name",
+    "name": "station_name",
+    "站点编码": "station_code",
+    "编码": "station_code",
+    "code": "station_code",
+}
+
+
+def _annotation_from(draft_annotation: Any, columns: Any) -> tuple[str | None, bool]:
     annotation = draft_annotation if isinstance(draft_annotation, Mapping) else {}
-    label = _clean(annotation.get("label_field")) or None
-    return label, bool(annotation.get("show", False))
+    raw_label = _clean(annotation.get("label_field"))
+    label = raw_label or None
+    available = {str(column) for column in columns}
+    if label is not None and label not in available:
+        label = LABEL_ALIASES.get(label.lower(), LABEL_ALIASES.get(label))
+        if label not in available:
+            label = None
+    show = bool(annotation.get("show", False)) and label is not None
+    return label, show
 
 
 def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: Mapping[str, Any]) -> MapSpec:
@@ -461,10 +495,16 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
     if method not in SUPPORTED_METHODS:
         method = "quantile"
     n = _clamp_int(classification.get("n"), default=5, low=2, high=9)
-    breaks = _breaks_for(gdf, field_name, method, n)
-
     scheme, reverse, palette_note = _palette_from(draft.get("palette"))
-    label_field, show_label = _annotation_from(draft.get("annotation"))
+    unit = METRIC_UNITS.get(field_name)
+
+    if field_name == "AQI":
+        method, n, breaks = "custom", 6, list(AQI_BREAKS)
+        scheme, reverse, palette_note = AQI_SCHEME, False, None
+        unit = AQI_UNIT
+    else:
+        breaks = _breaks_for(gdf, field_name, method, n)
+    label_field, show_label = _annotation_from(draft.get("annotation"), gdf.columns)
     notes = _merge_notes(
         loaded.get("reason_lines"),
         list(draft.get("notes") or []) + ([palette_note] if palette_note else []),
@@ -480,6 +520,7 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
             "method": method,
             "n": n,
             "breaks": breaks,
+            "unit": unit,
             "palette_scheme": scheme,
             "palette_reverse": reverse,
             "label_field": label_field,
@@ -516,13 +557,21 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
     if method not in SUPPORTED_METHODS:
         raise DataError(f"分级方法 {method!r} 不受支持；可用：{'、'.join(SUPPORTED_METHODS)}")
     n = _clamp_int(form.get("n"), default=5, low=2, high=9)
-    breaks = _breaks_for(gdf, field_name, method, n)
-
     scheme = _clean(form.get("palette_scheme")) or "YlOrRd"
     if scheme.lower() in FORBIDDEN_SCHEMES:
         raise DataError(f"配色 {scheme!r} 属于禁用彩虹色；请换用单色渐变")
+    unit = METRIC_UNITS.get(field_name)
+
+    if field_name == "AQI":
+        method, n, breaks = "custom", 6, list(AQI_BREAKS)
+        scheme, unit = AQI_SCHEME, AQI_UNIT
+    else:
+        breaks = _breaks_for(gdf, field_name, method, n)
 
     notes = _merge_notes(loaded.get("reason_lines"), [])
+    label_field = _clean(form.get("label_field")) or None
+    if label_field is not None and label_field not in gdf.columns:
+        label_field = None
     return build_spec(
         {
             "title": _local_title(place, field_name, date),
@@ -533,10 +582,11 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
             "method": method,
             "n": n,
             "breaks": breaks,
+            "unit": unit,
             "palette_scheme": scheme,
-            "palette_reverse": bool(form.get("palette_reverse", False)),
-            "label_field": form.get("label_field"),
-            "show_label": bool(form.get("show_label", False)),
+            "palette_reverse": False if field_name == "AQI" else bool(form.get("palette_reverse", False)),
+            "label_field": label_field,
+            "show_label": bool(form.get("show_label", False)) and label_field is not None,
             "data_source_note": f"{layer.source}；更新时间：{date}",
             "crs": "EPSG:4490",
             "notes": notes,
@@ -616,6 +666,14 @@ def _make_llm_map_fn(
             "data_profile": _profile_payload(loaded["profile"]),
             "decision": loaded["decision"],
             "layer_kind": loaded["layer"].kind,
+            "output_schema": {
+                "title": "含区域、指标、日期与单位的图名",
+                "classification": {"method": "quantile|jenks|equal_interval|custom", "n": 5},
+                "palette": {"scheme": "YlOrRd|YlGnBu|Reds|Blues", "reverse": False},
+                "annotation": {"label_field": "可选", "show": False},
+                "notes": ["补充说明，可空"],
+            },
+            "format_instruction": "只返回一个 JSON 对象，不要 Markdown 表格、代码围栏或解释；breaks 不用返回，由系统计算。",
         }
         draft = llm_callable(prompt, payload)
         if not isinstance(draft, Mapping):
@@ -665,13 +723,15 @@ def _to_mapspec(spec: Any) -> MapSpec:
         clean["classification"] = {
             key: value
             for key, value in classification.items()
-            if key in {"method", "n", "breaks"}
+            if key in {"method", "n", "breaks", "unit"}
         }
 
     palette = clean.get("palette")
     palette_map = palette if isinstance(palette, Mapping) else {}
     scheme = _clean(palette_map.get("scheme")) or "YlOrRd"
-    if scheme.lower() in FORBIDDEN_SCHEMES or scheme not in matplotlib.colormaps:
+    if scheme.lower() in FORBIDDEN_SCHEMES:
+        scheme = "YlOrRd"
+    elif scheme.strip().lower() not in AQI_SCHEMES and scheme not in matplotlib.colormaps:
         scheme = "YlOrRd"
     clean["palette"] = {"scheme": scheme, "reverse": bool(palette_map.get("reverse", False))}
 
@@ -717,7 +777,10 @@ def _make_render_fn(
             raise DataError("渲染前没有加载结果")
         map_spec = _to_mapspec(spec)
         gdf = _render_frame(map_spec, loaded)
-        result = run_render(map_spec, gdf, out_dir, name="web_map")
+        kwargs: dict[str, Any] = {}
+        if map_spec.map_type == "point" and loaded.get("admin") is not None:
+            kwargs["background_gdf"] = loaded["admin"].gdf
+        result = run_render(map_spec, gdf, out_dir, name="web_map", **kwargs)
         state["render"] = result
         if result.png_path is None:
             raise DataError("渲染没有返回 PNG 路径")

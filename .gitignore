@@ -47,6 +47,10 @@ dist/
 !web/dist/**
 build/
 out/
+
+# --- 前端测试产物 ---
+web/test-results/
+web/playwright-report/
 target/
 bin/
 obj/
