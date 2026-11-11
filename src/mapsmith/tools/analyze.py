@@ -120,6 +120,10 @@ def buffer_layer(
     area_km2 = float(buffered.geometry.area.sum()) / 1e6
 
     out = buffered.to_crs(WGS84)
+    # 把简洁语义名写入 gdf.attrs（point→站点缓冲区、admin→行政边界缓冲区），
+    # 供渲染层（render_overlay 图例标签）直接读取，避免退回无意义的图层 id。
+    semantic = {"point": "站点", "admin": "行政边界"}.get(layer.kind, "要素")
+    out.attrs["name"] = f"{semantic}缓冲区"
     kind = _kind_from_geometry(out)
     summary = (
         f"{layer.name} 缓冲 {distance:g} km：生成 {len(out)} 个缓冲面，"

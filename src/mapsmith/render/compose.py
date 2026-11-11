@@ -60,10 +60,19 @@ def _resolve_buffer_km(gdf: Any, buffer_km: float | None) -> float | None:
 
 
 def _layer_label(gdf: Any, fallback: str) -> str:
-    """图层图例标签：优先 ``name`` 列、其次 ``adcode`` 列，否则用 ``fallback``。"""
+    """图层图例标签。
+
+    - 多要素图层（``len > 1``）：返回 ``fallback`` 通用名，不取单行 ``name``——
+      避免「鼓楼区」这种以单行 name 以偏概全代表整层的情况。
+    - 单要素图层：优先 ``name`` 列、其次 ``adcode`` 列，否则用 ``fallback``。
+    """
+    if gdf is None or len(gdf) == 0:
+        return fallback
+    if len(gdf) > 1:
+        return fallback
     for column in ("name", "adcode"):
-        if column in getattr(gdf, "columns", []) and len(gdf) > 0:
-            value = gdf[column].iloc[0]
+        if column in getattr(gdf, "columns", []):
+            value = gdf.iloc[0][column]
             if value is not None and str(value).strip():
                 return str(value)
     return fallback
@@ -198,6 +207,7 @@ def render_overlay(
     gdf: Any,
     *,
     other_gdf: Any = None,
+    labels: tuple[str, str] | None = None,
     unit: str | None = None,
     out_path: str | Path | None = None,
     pdf_path: str | Path | None = None,
@@ -206,7 +216,9 @@ def render_overlay(
 
     - ``gdf``：底层图层（面），浅色填充 alpha 0.5。
     - ``other_gdf``：上层图层（面），半透明填充 + 描边。
-    - 图例标明两个图层（用 name/adcode 列或 spec.layers 的 id）。
+    - ``labels``：显式图例标签 ``(底层, 上层)``；缺省自动推断——底层多要素用「行政边界」
+      这类通用名、单要素用 name 列；上层优先取 ``other_gdf.attrs["name"]``（如「站点缓冲区」），
+      取不到退回 spec 里 kind=overlay 图层的 id。
     """
     if other_gdf is None:
         raise DataError("overlay 需要 other_gdf（上层图层）")
@@ -236,9 +248,12 @@ def render_overlay(
     ax.set_ylim(miny, maxy)
 
     overlay_layer_id = next((layer.id for layer in spec.layers if layer.kind == "overlay"), "上层")
-    base_layer_id = next((layer.id for layer in spec.layers if layer.kind != "overlay"), "底层")
-    base_label = _layer_label(gdf, base_layer_id)
-    other_label = _layer_label(other_gdf, overlay_layer_id)
+    if labels is not None:
+        base_label, other_label = labels
+    else:
+        base_label = _layer_label(gdf, "行政边界")
+        attrs = getattr(other_gdf, "attrs", {}) or {}
+        other_label = attrs.get("name") or _layer_label(other_gdf, overlay_layer_id)
 
     if spec.layout.legend:
         ax.legend(

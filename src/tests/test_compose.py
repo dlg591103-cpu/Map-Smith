@@ -238,6 +238,55 @@ def test_overlay_legend_has_two_items_labeled() -> None:
     plt.close("all")
 
 
+def test_overlay_multi_feature_base_uses_generic_label() -> None:
+    """多要素底层不得取单行 name（「鼓楼区」以偏概全），应回退通用名「行政边界」。"""
+    base = gpd.GeoDataFrame(
+        {"name": ["鼓楼区", "云龙区"]},
+        geometry=[box(116.0, 34.0, 117.0, 34.5), box(117.0, 34.0, 118.0, 34.5)],
+        crs="EPSG:4326",
+    )
+    other = make_overlay_gdfs()[1]
+    report = render_overlay(make_overlay_spec(), base, other_gdf=other)
+    assert report.base_label == "行政边界"
+    assert "鼓楼区" not in report.base_label
+    assert "云龙区" not in report.base_label
+    plt.close("all")
+
+
+def test_overlay_single_feature_base_uses_name() -> None:
+    """单要素底层可用其 name。"""
+    base = gpd.GeoDataFrame(
+        {"name": ["鼓楼区"]},
+        geometry=[box(116.0, 34.0, 117.0, 34.5)],
+        crs="EPSG:4326",
+    )
+    other = make_overlay_gdfs()[1]
+    report = render_overlay(make_overlay_spec(), base, other_gdf=other)
+    assert report.base_label == "鼓楼区"
+    plt.close("all")
+
+
+def test_overlay_other_uses_attrs_semantic_name() -> None:
+    """上层带 attrs["name"] 时应显示语义名（站点缓冲区）而非图层 id（data）。"""
+    base, other = make_overlay_gdfs()
+    other.attrs["name"] = "站点缓冲区"
+    report = render_overlay(make_overlay_spec(), base, other_gdf=other)
+    assert report.other_label == "站点缓冲区"
+    assert report.other_label != "data"
+    plt.close("all")
+
+
+def test_overlay_explicit_labels_override() -> None:
+    """labels 参数显式指定时优先于自动推断。"""
+    base, other = make_overlay_gdfs()
+    report = render_overlay(
+        make_overlay_spec(), base, other_gdf=other, labels=("行政边界", "站点缓冲区")
+    )
+    assert report.base_label == "行政边界"
+    assert report.other_label == "站点缓冲区"
+    plt.close("all")
+
+
 def test_overlay_requires_other_gdf() -> None:
     with pytest.raises(DataError, match="other_gdf"):
         render_overlay(make_overlay_spec(), make_buffer_gdf())
