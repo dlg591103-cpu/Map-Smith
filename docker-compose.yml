@@ -1,0 +1,12 @@
+services:
+  mapsmith:
+    build: .
+    image: mapsmith:local
+    ports:
+      - "${PORT:-8501}:8501"
+    environment:
+      PYTHONIOENCODING: "utf-8"
+      MAPSMITH_OUTPUT_DIR: "/app/out"
+    volumes:
+      - "./out:/app/out"
+    restart: unless-stopped
