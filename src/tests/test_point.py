@@ -243,13 +243,16 @@ def test_render_dispatches_by_map_type() -> None:
     plt.close("all")
 
 
-def test_render_unimplemented_map_type_raises() -> None:
+def test_render_dispatches_buffer() -> None:
+    from mapsmith.render.compose import BufferReport
+
     spec = make_point_spec(
         map_type="buffer",
-        layers=[Layer(id="data", kind="buffer", field="pm25")],
+        classification=None,
+        layers=[Layer(id="data", kind="buffer")],
     )
-    with pytest.raises(NotImplementedError, match="尚未实现"):
-        render(spec, make_point_gdf([30, 45]))
+    report = render(spec, make_point_gdf([30, 45]))
+    assert isinstance(report, BufferReport)
     plt.close("all")
 
 

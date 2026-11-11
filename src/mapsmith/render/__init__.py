@@ -26,9 +26,15 @@ def render(spec: MapSpec, gdf: Any, **kwargs: Any) -> Any:
         from .idw import render_idw
 
         return render_idw(spec, gdf, **kwargs)
-    raise NotImplementedError(
-        f"图种 {spec.map_type!r} 的渲染尚未实现（当前支持 choropleth / point / idw）"
-    )
+    if spec.map_type == "buffer":
+        from .compose import render_buffer
+
+        return render_buffer(spec, gdf, **kwargs)
+    if spec.map_type == "overlay":
+        from .compose import render_overlay
+
+        return render_overlay(spec, gdf, **kwargs)
+    raise NotImplementedError(f"图种 {spec.map_type!r} 的渲染尚未实现")
 
 
 __all__ = ["render"]
