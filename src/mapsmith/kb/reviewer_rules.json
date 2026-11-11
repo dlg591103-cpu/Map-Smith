@@ -1,0 +1,111 @@
+{
+  "version": "1.0",
+  "name": "reviewer_rules",
+  "description": "审图员 R01-R10 确定性规则知识库。判定由 tools/qa_check.py 执行，本文件只保存规则元数据与修复提示，不参与联网检索。",
+  "source": "docs/facts/07-制图规范与审查.md",
+  "rules": [
+    {
+      "id": "R01",
+      "title": "图名包含区域、指标、时间",
+      "severity": "fail",
+      "category": "title",
+      "fix_hint": "title 必须同时出现行政区名称或 extent 区域标识、指标名称与日期；缺 title/extent/layout 直接判 fail。",
+      "fix_spec_patch": {
+        "title": "<区域><指标><时间>图"
+      }
+    },
+    {
+      "id": "R02",
+      "title": "图例有分级断点与单位",
+      "severity": "fail",
+      "category": "legend",
+      "fix_hint": "layout.legend 置为 true，classification.breaks 非空，并声明 unit。",
+      "fix_spec_patch": {
+        "layout.legend": true,
+        "classification.unit": "μg/m³"
+      }
+    },
+    {
+      "id": "R03",
+      "title": "比例尺已声明并绘制",
+      "severity": "fail",
+      "category": "layout",
+      "fix_hint": "layout.scale_bar 必须为 true；渲染层需实际绘制，可由 render_meta.scale_bar 回执确认。",
+      "fix_spec_patch": {
+        "layout.scale_bar": true
+      }
+    },
+    {
+      "id": "R04",
+      "title": "指北针已声明并绘制",
+      "severity": "fail",
+      "category": "layout",
+      "fix_hint": "layout.north_arrow 必须为 true；渲染层需实际绘制，可由 render_meta.north_arrow 回执确认。",
+      "fix_spec_patch": {
+        "layout.north_arrow": true
+      }
+    },
+    {
+      "id": "R05",
+      "title": "数据来源含更新时间或日期",
+      "severity": "fail",
+      "category": "source",
+      "fix_hint": "data_source_note 非空，且包含来源与 YYYY-MM-DD 形式的更新日期。",
+      "fix_spec_patch": {
+        "data_source_note": "数据来源：<来源名称>；更新时间：<YYYY-MM-DD>"
+      }
+    },
+    {
+      "id": "R06",
+      "title": "分级方法与级数声明且自洽",
+      "severity": "fail",
+      "category": "classification",
+      "fix_hint": "classification.method 与 n 必须声明；breaks 存在时数量须为 n-1 或 n，且严格递增。",
+      "fix_spec_patch": {
+        "classification.method": "quantile",
+        "classification.n": 5
+      }
+    },
+    {
+      "id": "R07",
+      "title": "坐标系为 EPSG:4326 或 CGCS2000",
+      "severity": "fail",
+      "category": "crs",
+      "fix_hint": "crs 非空，取值为 EPSG:4326、EPSG:4490 或 CGCS2000。",
+      "fix_spec_patch": {
+        "crs": "EPSG:4490"
+      }
+    },
+    {
+      "id": "R08",
+      "title": "配色语义正确且禁用彩虹色",
+      "severity": "fail",
+      "category": "palette",
+      "fix_hint": "AQI 用国标六级固定色阶；跨零数值用发散配色；连续量用单色渐变；禁止 jet/rainbow。",
+      "fix_spec_patch": {
+        "palette.scheme": "YlOrRd"
+      }
+    },
+    {
+      "id": "R09",
+      "title": "中文字体设置正确",
+      "severity": "fail",
+      "category": "font",
+      "fix_hint": "font.sans_serif 含 Microsoft YaHei 或 SimHei，unicode_minus 为 false。",
+      "fix_spec_patch": {
+        "font.sans_serif": ["Microsoft YaHei", "SimHei"],
+        "font.unicode_minus": false
+      }
+    },
+    {
+      "id": "R10",
+      "title": "缺失值处理说明",
+      "severity": "fail",
+      "category": "missing",
+      "fix_hint": "field 存在 NaN 时，notes 必须说明缺失/缺测/插补策略。",
+      "fix_spec_patch": {
+        "notes": ["<X> 个站点缺测，按<方法>插补"]
+      }
+    }
+  ]
+}

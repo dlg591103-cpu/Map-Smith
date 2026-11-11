@@ -8,7 +8,7 @@
 
 路径：`Settings` → `General` → 页面底部 `Danger Zone` → `Change repository visibility` → `Change to public`。
 
-- GitHub 会要求输入完整仓库名 `dlg591103-cpu/webgis-twin-lab` 确认。
+- GitHub 会要求输入完整仓库名 `dlg591103-cpu/Map-Smith` 确认。
 - 提示：公开后所有人都能查看代码、Fork 和提交 PR；已有的星标、关注者会保留，公开后不能再改回私有而不丢失这些数据。
 
 完成标志：仓库页顶部显示 `Public`，未登录浏览器可直接打开仓库。
@@ -82,7 +82,7 @@
 
 由协作者 `PINGNINGYI` 执行，维护者观察结果：
 
-1. `git clone https://github.com/<PINGNINGYI>/webgis-twin-lab.git`（Fork 后）或直接克隆上游。
+1. `git clone https://github.com/<PINGNINGYI>/Map-Smith.git`（Fork 后）或直接克隆上游。
 2. 基于上游 `main` 建分支：`git switch -c docs/test-collab upstream/main`。
 3. 做一处无风险文档改动，推送并向上游 `main` 发 PR。
 4. 确认 PR 自动带上模板、自动请求维护者评审、CI 未配置时显示无检查。
@@ -92,9 +92,16 @@
 记录（2026-11-05）：
 
 - 权限：`PINGNINGYI` 直接向本仓库推送 `docs/test-collab` 成功，确认为 Write。
-- PR #2：`https://github.com/dlg591103-cpu/webgis-twin-lab/pull/2`，显示 `Merging is blocked`、`1 pending review`，自动请求 `dlg591103-cpu` 作为 code owner；该 PR 为验证用途，已关闭、不合并。
+- PR #2：`https://github.com/dlg591103-cpu/Map-Smith/pull/2`，显示 `Merging is blocked`、`1 pending review`，自动请求 `dlg591103-cpu` 作为 code owner；该 PR 为验证用途，已关闭、不合并。
+- 仓库于 2026-11-10 由 `webgis-twin-lab` 更名为 `Map-Smith`；此前记录中的旧域名由 GitHub 自动重定向，功能不受影响。
 - 直推 `main`：返回 protected branch / GH006，拒绝成功。
 - 未验证：PR 模板自动填充；协作者 PR 获批后 Squash 合并（PR #1 由维护者本人发起）。
+
+记录（2026-11-10）：
+
+- PR #8（T12 审图员，源分支 `feat/reviewer-qacheck`）：分支基线停在 `15af002`（2026-11-05），此后 `main` 已合入 PR #4–#7。PR 页面列出 4 个冲突文件：`README.md`（content 冲突）、`src/mapsmith/__init__.py`、`src/mapsmith/agents/__init__.py`、`src/mapsmith/tools/__init__.py`（后三者均为 add/add），并提示须先解决冲突才能继续。本地 `git merge origin/main` 解决 4 处冲突、全套测试通过后推送 `2623b8d`，PR 冲突提示消除，随后以 Squash 合并为 `0b9063d`。
+- 冲突分支能否用 bypass 跳过：未单独实测。解决前 PR 页面仅显示灰色 `Squash and merge` 与 `Merging is blocked` 提示。
+- PR #9（规则第 1 节补充，源分支 `docs/branch-sync-rule`）：仅改 `docs/工程规则.md`（+2 行），以 Squash 合并为 `b996fa0`。`CODEOWNERS` 中 `/docs/` 仅 `dlg591103-cpu`，而该 PR 由同一账号发起，GitHub 不允许批准自己的 PR；合并时的批准方式未记录。
 
 ## 7. 常见问题
 
