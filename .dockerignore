@@ -1,0 +1,13 @@
+# 构建上下文裁剪：镜像只需要 src/ 与 web/dist/，其余不入上下文。
+# 依据：docs/Spec/V0.1-专题制图智能体.md 第 6 节 T23。
+.git/
+.venv/
+venv/
+out/
+docs/
+web/node_modules/
+web/test-results/
+web/playwright-report/
+scripts/
+*.zip
+*.log

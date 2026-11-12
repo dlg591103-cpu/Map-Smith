@@ -1,0 +1,27 @@
+# Map Smith 容器编排。
+#
+# 依据：docs/Spec/V0.1-专题制图智能体.md 第 7 节验收条件（`docker compose up` 可运行）
+# 与 docs/facts/08-交付形态.md（评委不装 Python 也能运行）。
+#
+# 用法：docker compose up --build
+# 浏览器打开 http://127.0.0.1:8501
+#
+# LLM 配置为可选：不配置时界面仍可用表单模式出图（离线 demo_data 兜底），
+# 一句话模式需要三选一提供 LLM 三项（见 docs/Spec/T22-一句话入口与loop接入.md 第 4 节），
+# 可用 .env 文件或 shell 环境变量注入。
+
+services:
+  mapsmith:
+    build: .
+    image: mapsmith:v0.1.0
+    container_name: mapsmith
+    ports:
+      - "8501:8501"
+    environment:
+      MAPSMITH_LLM_BASE_URL: ${MAPSMITH_LLM_BASE_URL:-}
+      MAPSMITH_LLM_API_KEY: ${MAPSMITH_LLM_API_KEY:-}
+      MAPSMITH_LLM_MODEL: ${MAPSMITH_LLM_MODEL:-}
+    volumes:
+      # 产物（PNG / PDF）持久化到宿主机 out/ 目录。
+      - ./out:/app/out
+    restart: unless-stopped
