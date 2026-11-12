@@ -190,3 +190,10 @@ def test_render_png_nonempty(tmp_path) -> None:
     fig.savefig(out, dpi=100)
     plt.close(fig)
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_palette_colors_aqi6_uses_national_six_colors() -> None:
+    from mapsmith.render.layout import AQI_COLORS
+
+    spec = make_spec(palette=Palette(scheme="AQI6", reverse=False))
+    assert palette_colors(spec, 6) == list(AQI_COLORS)

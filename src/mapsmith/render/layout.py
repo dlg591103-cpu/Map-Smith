@@ -31,6 +31,10 @@ METHOD_LABELS = {
     "custom": "自定义",
 }
 
+# 国标环境空气质量指数（AQI）六级固定色阶：优、良、轻度、中度、重度、严重。
+AQI_COLORS = ("#00E400", "#FFFF00", "#FF7E00", "#FF0000", "#8F3F97", "#7E0023")
+AQI_SCHEMES = {"aqi6", "aqi", "cn_aqi", "china_aqi", "national_aqi"}
+
 _NICE_STEPS = (1.0, 2.0, 5.0)
 
 
@@ -127,6 +131,14 @@ def palette_colors(spec: MapSpec, n: int) -> list[str]:
     不代填配色。未知方案报 `DataError`，不静默回退到默认色阶。
     """
     scheme = spec.palette.scheme
+    if scheme.strip().lower() in AQI_SCHEMES:
+        if n > len(AQI_COLORS):
+            raise DataError(f"AQI 固定六级色阶，级数不能超过 {len(AQI_COLORS)}，实际为 {n}")
+        colors = list(AQI_COLORS[:n])
+        if spec.palette.reverse:
+            colors = list(reversed(colors))
+        return colors
+
     try:
         cmap = matplotlib.colormaps[scheme]
     except KeyError:
@@ -208,24 +220,26 @@ def draw_scale_bar(
     return length_m, label
 
 
-def draw_north_arrow(ax: Axes) -> None:
-    """指北针（第 4 条）：画在右上角，箭头朝上，「N」标在箭头之上。
+def draw_north_arrow(ax: Axes, *, anchor: tuple[float, float] = (0.94, 0.86)) -> None:
+    """指北针（第 4 条）：默认画在右上角，箭头朝上，「N」标在箭头之上。
 
-    图例固定占右下角（``draw_legend`` 的 ``loc="lower right"``），指北针因此放在右上角，
-    并抬到 ``zorder=6``，避免被图例底框或地图主体压住。
+    点图取景范围收窄后数据点可能落在右上角，调用方可把 ``anchor`` 指到图框外，
+    避免指北针与气泡重叠。图例固定占右下角（``draw_legend`` 的 ``loc="lower right"``）。
     """
+    x, y = anchor
     ax.annotate(
         "",
-        xy=(0.94, 0.86),
-        xytext=(0.94, 0.76),
+        xy=(x, y),
+        xytext=(x, y - 0.10),
         xycoords="axes fraction",
         textcoords="axes fraction",
         arrowprops=dict(arrowstyle="-|>", color="black", lw=1.5),
         zorder=6,
+        annotation_clip=False,
     )
     ax.text(
-        0.94,
-        0.875,
+        x,
+        y + 0.015,
         "N",
         transform=ax.transAxes,
         ha="center",
@@ -265,6 +279,7 @@ class LayoutReport:
     scale_bar_length_m: float | None = None
     scale_bar_label: str | None = None
     font: str | None = None
+    north_arrow_anchor: tuple[float, float] | None = None
     summary: str = ""
 
 
@@ -276,6 +291,7 @@ def apply_layout(
     extent_m: tuple[float, float, float, float] | None = None,
     unit: str | None = None,
     legend_anchor: tuple[float, float] | None = None,
+    north_arrow_anchor: tuple[float, float] | None = None,
     extra_note: str | None = None,
 ) -> LayoutReport:
     """按 spec.layout 的标志补齐版式要素，并加载中文字体。
@@ -306,7 +322,9 @@ def apply_layout(
         report.drawn.append("比例尺")
 
     if spec.layout.north_arrow:
-        draw_north_arrow(ax)
+        anchor = north_arrow_anchor or (0.94, 0.86)
+        draw_north_arrow(ax, anchor=anchor)
+        report.north_arrow_anchor = anchor
         report.drawn.append("指北针")
 
     draw_notes(fig, spec, extra_note=extra_note)

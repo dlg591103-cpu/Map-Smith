@@ -84,6 +84,8 @@ class Classification(BaseModel):
     method: ClassMethod
     n: int = Field(ge=2, le=9)
     breaks: list[float | None] = Field(default_factory=list)
+    # 图例单位（审查 R02 读取）；AQI 等无量纲指标可填「无量纲」。
+    unit: str | None = None
 
     @model_validator(mode="after")
     def _check_breaks(self):

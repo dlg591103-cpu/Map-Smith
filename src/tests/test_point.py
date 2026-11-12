@@ -254,7 +254,7 @@ def test_render_unimplemented_map_type_raises() -> None:
 
 
 def test_render_legends_outside_axes_and_north_arrow_visible() -> None:
-    """回归防护：断点图例与气泡大小图例都必须在图框外，且指北针 N 真实可见。"""
+    """回归防护：图例必须在图框外；指北针也在图框外，且不与图例/气泡重叠。"""
     render_point(make_point_spec(), make_point_gdf([30, 45, 55, 65, 80]))
     fig = plt.gcf()
     fig.canvas.draw()
@@ -269,7 +269,9 @@ def test_render_legends_outside_axes_and_north_arrow_visible() -> None:
 
     n_texts = [t for t in ax.texts if t.get_text() == "N"]
     assert n_texts
-    assert n_texts[0].get_window_extent(renderer).overlaps(ax_box)
+    n_box = n_texts[0].get_window_extent(renderer)
+    assert not n_box.overlaps(ax_box)
+    assert n_box.x1 <= ax_box.x0  # 图框左侧外，远离右侧图例
     plt.close("all")
 
 
@@ -277,4 +279,18 @@ def test_render_png_nonempty(tmp_path) -> None:
     out = tmp_path / "t17.png"
     render_point(make_point_spec(), make_point_gdf([30, 45, 55, 65, 80]), out_path=out)
     assert out.exists() and out.stat().st_size > 10_000
+    plt.close("all")
+
+
+def test_render_point_draws_admin_background() -> None:
+    background = gpd.GeoDataFrame(
+        {"geometry": [box(116.5, 34.0, 117.8, 34.5)]},
+        crs="EPSG:4326",
+    )
+    report = render_point(
+        make_point_spec(),
+        make_point_gdf([30, 45]),
+        background_gdf=background,
+    )
+    assert report.background is True
     plt.close("all")

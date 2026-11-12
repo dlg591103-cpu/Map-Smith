@@ -1,4 +1,4 @@
-"""T22 界面骨架的纯函数层：无 streamlit 依赖，可单测。
+"""T22 界面的纯函数层：无前端依赖，可单测。
 
 职责：
 - `build_spec`：把表单值组装成合法 MapSpec；非法组合抛带中文说明的 `DataError`。
@@ -7,7 +7,7 @@
 - `aggregate_points_to_admin`：把站点值按空间归属聚合到边界面（供 choropleth）。
 - `run_render`：分派渲染并落盘 PNG + PDF。
 
-Streamlit 组件难测，这里只放可单测的纯函数；控件与状态全部在 `app.py`。
+界面在 `web/`（Vue 3 + Vite）；这里只放可单测的计算与渲染分派。
 """
 
 from __future__ import annotations
@@ -124,6 +124,7 @@ def build_spec(fields: dict[str, Any]) -> MapSpec:
                 method=method,  # type: ignore[arg-type]
                 n=n,
                 breaks=breaks,
+                unit=fields.get("unit"),
             ),
             palette=Palette(
                 scheme=str(fields.get("palette_scheme", "YlOrRd")),
@@ -209,10 +210,12 @@ def run_render(
     out_dir: str | Path,
     *,
     name: str = "map",
+    background_gdf: Any = None,
 ) -> RenderResult:
     """按 `spec.map_type` 分派渲染，把 PNG 与 PDF 落盘到 `out_dir`，返回路径与报告。
 
     `layer` 可以是 `DataLayer`（取 `.gdf`）或直接 GeoDataFrame。
+    `background_gdf` 仅点图使用，作为城市面底色；其他图种忽略。
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -223,5 +226,11 @@ def run_render(
     if gdf is None:
         raise DataError("图层没有几何数据，无法渲染")
 
-    report = render(spec, gdf, out_path=png_path, pdf_path=pdf_path)
+    report = render(
+        spec,
+        gdf,
+        out_path=png_path,
+        pdf_path=pdf_path,
+        background_gdf=background_gdf,
+    )
     return RenderResult(png_path=png_path, pdf_path=pdf_path, report=report)

@@ -73,6 +73,18 @@ class Settings:
     max_global_rounds: int = 8
     global_timeout_s: float = 60.0
 
+    # LLM 配置，来源：docs/Spec/T22-一句话入口与loop接入.md 第 4 节。
+    # 三项必填任一为空即视为未配置；api_key 不进入 as_dict()。
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    llm_timeout_s: float = 30.0
+
+    @property
+    def llm_configured(self) -> bool:
+        """base_url / api_key / model 都非空才算配置完成。"""
+        return bool(self.llm_base_url and self.llm_api_key and self.llm_model)
+
     @classmethod
     def from_env(cls) -> "Settings":
         """读取环境变量覆盖后的配置；非法数值直接报错，不静默回落。"""
@@ -85,6 +97,10 @@ class Settings:
             max_rework_rounds=_env_int("MAX_REWORK_ROUNDS", 2),
             max_global_rounds=_env_int("MAX_GLOBAL_ROUNDS", 8),
             global_timeout_s=_env_float("GLOBAL_TIMEOUT_S", 60.0),
+            llm_base_url=_env_text("LLM_BASE_URL"),
+            llm_api_key=_env_text("LLM_API_KEY"),
+            llm_model=_env_text("LLM_MODEL"),
+            llm_timeout_s=_env_float("LLM_TIMEOUT_S", 30.0),
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -98,6 +114,10 @@ class Settings:
             "max_rework_rounds": self.max_rework_rounds,
             "max_global_rounds": self.max_global_rounds,
             "global_timeout_s": self.global_timeout_s,
+            "llm_base_url": self.llm_base_url,
+            "llm_model": self.llm_model,
+            "llm_timeout_s": self.llm_timeout_s,
+            "llm_configured": self.llm_configured,
         }
 
 

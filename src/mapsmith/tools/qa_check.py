@@ -291,7 +291,10 @@ def _r06(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     if not breaks:
         return PASS, "分级方法与级数已声明", {}
 
-    numbers = [_to_float(item) for item in breaks]
+    # custom 允许末项为 None 表示无上界（如 AQI >300），其余项仍须是数值。
+    open_end = method == "custom" and breaks[-1] is None
+    numeric_source = breaks[:-1] if open_end else breaks
+    numbers = [_to_float(item) for item in numeric_source]
     if any(number is None for number in numbers):
         return FAIL, "分级断点含非数值", {"classification.breaks": "由 classify 计算后填写"}
     numeric = [number for number in numbers if number is not None]
