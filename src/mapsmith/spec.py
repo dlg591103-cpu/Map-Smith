@@ -12,6 +12,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pyproj import CRS
 
+from .projection import require_output_allowed
+
 MapType = Literal["idw", "choropleth", "point", "buffer", "overlay"]
 LayerKind = Literal["admin", "idw", "choropleth", "point", "buffer", "overlay", "raster"]
 ClassMethod = Literal["quantile", "jenks", "equal_interval", "custom"]
@@ -168,7 +170,9 @@ class MapSpec(BaseModel):
             CRS.from_user_input(value)
         except Exception as exc:  # pyproj 抛出的异常类型较多，统一转为字段错误
             raise ValueError(f"无法识别的坐标系：{value!r}") from exc
-        return value
+        # docs/facts/02：输出坐标系只允许白名单（CGCS2000 地理 / 3°GK / WGS84 UTM / Web Mercator）。
+        # 在 MapSpec 构造处拦截，避免流经 QA、编排或渲染时才失败。
+        return require_output_allowed(value)
 
     @model_validator(mode="after")
     def _check_layers(self):

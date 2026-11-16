@@ -31,6 +31,7 @@ from ..spec import MapSpec
 from .choropleth import _aspect_for, _transformed_extent
 from .layout import (
     LayoutReport,
+    _place_labels_avoiding_overlap,
     apply_layout,
     legend_labels,
     palette_colors,
@@ -284,8 +285,9 @@ def render_idw(
 
     # --- 标注 ---
     if label_field is not None and spec.annotation.show:
-        for xi, yi, text in zip(all_x, all_y, frame[label_field].astype(str)):
-            ax.annotate(str(text), (xi, yi), textcoords="offset points", xytext=(5, 5), fontsize=8)
+        label_coords = [(float(xi), float(yi)) for xi, yi in zip(all_x, all_y)]
+        label_texts = [str(t) for t in frame[label_field].astype(str)]
+        _place_labels_avoiding_overlap(ax, label_coords, label_texts, fontsize=6)
 
     ax.set_axis_off()
     ax.set_xlim(minx_o, maxx_o)

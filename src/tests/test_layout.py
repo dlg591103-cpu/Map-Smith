@@ -174,6 +174,20 @@ def test_apply_layout_notes_include_source_crs_method_missing() -> None:
     plt.close(fig)
 
 
+def test_review_status_note_is_drawn_outside_missing_value_line() -> None:
+    fig, ax = _figure()
+    spec = make_spec(
+        notes=["2 个站点缺测，已按空间邻近插补", "审查未完成（超时）：已用尽总时长。"]
+    )
+    apply_layout(fig, ax, spec)
+    lines = [line for text in (t.get_text() for t in fig.texts) for line in text.splitlines()]
+    missing_line = next(line for line in lines if "缺失值说明" in line)
+    assert "2 个站点缺测" in missing_line
+    assert "审查未完成" not in missing_line
+    assert "审查未完成（超时）：已用尽总时长。" in lines
+    plt.close(fig)
+
+
 def test_layout_flags_disable_elements() -> None:
     fig, ax = _figure()
     spec = make_spec(layout=Layout(legend=False, scale_bar=False, north_arrow=False))

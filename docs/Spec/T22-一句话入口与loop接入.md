@@ -387,6 +387,7 @@ web/
 
 - 控件与第一段一致：区域、日期、指标、图种、分级方法、级数、配色、上传。
 - `buffer` / `overlay` 不出现；文案「buffer / overlay 尚未实现，待 SPEC 决策」保留。
+  > 2026-11-16 已由 T25 覆盖：表单已开放 buffer/overlay，见 [T25 SPEC](T25-五图种与默认LLM.md) 第 2 节。
 - 提交调 `/api/form`，SSE 事件与结果卡片同对话视图。
 - 上传复用 `/api/upload` 与 CRS 确认。
 
@@ -443,6 +444,8 @@ SSE 错误不抛裸 traceback；服务端日志只记录 `request_id`、阶段�
 - 不新增前端组件库、Pinia、Vue Router。
 - 不做前端自动化 E2E（Playwright 等）；以 `npm run build` + API 测试 + 手工验收为准。
 - 不验证真实模型遵循度（本机无 Key）；真实模型联调列为未验证项。
+
+> 2026-11-16 补记：本节部分条目已被后续任务覆盖——`buffer` / `overlay` 已由 T25 实现；Playwright E2E 已在 T22 第二段完成；真实模型遵循度已由 T25 复验（用户本机终端）验证。未覆盖的「不做多轮上下文、模型软判、流式模型、用户系统、组件库」仍有效。
 
 ## 12. 待确认
 

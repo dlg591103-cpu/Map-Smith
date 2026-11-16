@@ -186,6 +186,17 @@ def test_invalid_crs_rejected():
         MapSpec.model_validate(make(crs="EPSG:ABC"))
 
 
+def test_non_whitelisted_output_crs_rejected():
+    """docs/facts/02：WGS84 地理（4326）不在输出白名单，必须在 MapSpec 构造时拒绝。"""
+    with pytest.raises(ValidationError, match="白名单"):
+        MapSpec.model_validate(make(crs="EPSG:4326"))
+
+
+def test_whitelisted_output_crs_accepted():
+    for crs in ("EPSG:4490", "EPSG:3857", "EPSG:4548", "EPSG:32650"):
+        assert MapSpec.model_validate(make(crs=crs)).crs == crs
+
+
 def test_rainbow_palette_rejected():
     for scheme in ["jet", "rainbow", "HSV"]:
         with pytest.raises(ValidationError, match="彩虹"):

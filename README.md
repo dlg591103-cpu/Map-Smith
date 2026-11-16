@@ -32,12 +32,12 @@
 -   项目骨架已建立并纳入版本控制：`README.md`、`AGENTS.md`、`docs/`、`src/`。
 -   产品事实文档：已建立 8 份（产品定义、范围与边界、架构原则、三 Agent 协议、MapSpec 与工具契约、数据源、制图规范、交付形态），位于 [`docs/facts/`](docs/facts/)。
 -   SPEC：[`docs/Spec/V0.1-专题制图智能体.md`](docs/Spec/V0.1-专题制图智能体.md)，状态为已确认（2026-11-05），按 SPEC 第 6.1 节的任务分支开发。
--   `src/`：技术栈为 Python 3.12 + geopandas / matplotlib / mapclassify + Vue 3 / FastAPI（T22 第二段起移除 Streamlit）。T01–T23 已完成：环境与依赖锁、骨架与配置、MapSpec 与校验、投影选带、数据解析与上传（CSV / GeoJSON / Shapefile zip）、GeoTIFF 底图、离线 demo_data、体检与两档插值判定、classify / analyze、四类渲染与版式要素、审图规则库与 `qa_check`、三 Agent 编排与返工兜底、Vue + FastAPI 界面、打包（`run.ps1` / `run.sh` / `Dockerfile` / `docker-compose.yml`）。自检与验收记录分别见 [`docs/自检/`](docs/自检/)、[`docs/验收/`](docs/验收/)。剩余 T24：端到端验收与文档同步。
+-   `src/`：技术栈为 Python 3.12 + geopandas / matplotlib / mapclassify + Vue 3 / FastAPI（T22 第二段起移除 Streamlit）。T01–T23 已完成：环境与依赖锁、骨架与配置、MapSpec 与校验、投影选带、数据解析与上传（CSV / GeoJSON / Shapefile zip）、GeoTIFF 底图、离线 demo_data、体检与两档插值判定、classify / analyze、四类渲染与版式要素、审图规则库与 `qa_check`、三 Agent 编排与返工兜底、Vue + FastAPI 界面、打包（`run.ps1` / `run.sh` / `Dockerfile` / `docker-compose.yml`）。自检与验收记录分别见 [`docs/自检/`](docs/自检/)、[`docs/验收/`](docs/验收/)。T24 端到端验收记录已订正；T25 五图种与默认 LLM、PR #27 v0.1.1 集成 A1/A2 修复均已通过独立验收/复验，合并与上线待用户授权。
 -   远端仓库：`https://github.com/dlg591103-cpu/Map-Smith`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 -   多人协作：仓库已公开，`PINGNINGYI` 已作为协作者加入并具备 Write 权限。`main` 已启用 Rulesets 保护（要求 PR、1 个批准、Code Owner 评审、禁止强推与删除）；bypass list 仅含仓库拥有者 `dlg591103-cpu`（`For pull requests only`），拥有者可自行合并自己的 PR，其余账号仍需批准。实测：PR #4 经 bypass 以 Squash 合并，`main` 为 `40a680b`。经典保护下已实测：协作者可推送分支并发起 PR、直推 `main` 被拒绝（protected branch / GH006）、未获批准时合并被阻止。PR 模板自动填充尚待下一次建 PR 时确认。
 -   审图员（SPEC T19 / 需求单 T12 Reviewer）：`tools/qa_check.py` 十条硬规则、`agents/reviewer.py` 返工契约、`kb/reviewer_rules.json` 与审图 prompt 已完成，自检见 [`docs/自检/T19-reviewer-自检记录.md`](docs/自检/T19-reviewer-自检记录.md)。
 -   T22 第二段（2026-11-10）：界面从 Streamlit 换为 Vue 3 + Vite（`web/`，`dist/` 入库）+ FastAPI（`src/mapsmith/server.py`），一句话与表单都经 `loop.run`；SPEC 见 [`docs/Spec/T22-一句话入口与loop接入.md`](docs/Spec/T22-一句话入口与loop接入.md)，自检见 [`docs/自检/T22-界面-第二段.md`](docs/自检/T22-界面-第二段.md)。
--   T23 打包（2026-11-16）：`run.ps1`（Windows 一键启动）、`run.sh`（Linux / macOS）、`Dockerfile`、`docker-compose.yml`、`.dockerignore`；独立验收通过，记录见 [`docs/验收/T23.md`](docs/验收/T23.md)。GitHub Release **v0.1.0** 已发布，附 `mapsmith-v0.1.0.zip`：<https://github.com/dlg591103-cpu/Map-Smith/releases/tag/v0.1.0>。
+-   T23 打包（2026-11-16）：`run.ps1`（Windows 一键启动）、`run.sh`（Linux / macOS）、`Dockerfile`、`docker-compose.yml`、`.dockerignore`；独立验收通过，记录见 [`docs/验收/T23.md`](docs/验收/T23.md)。GitHub Release **v0.1.0** 已发布，附 `mapsmith-v0.1.0.zip`：<https://github.com/dlg591103-cpu/Map-Smith/releases/tag/v0.1.0>。**v0.1.1 发布准备完成**：版本号与发布包已验证，合并、tag 与 Release 待在本机终端执行，见 [`docs/验收/v0.1.1.md`](docs/验收/v0.1.1.md)。
 
 ## 版本管理约定
 

@@ -31,6 +31,7 @@ from .choropleth import _aspect_for, _transformed_extent, class_index
 from .extent import drawing_extent
 from .fonts import load_chinese_font
 from .layout import (
+    _POINT_NORTH_ARROW_CANDIDATES,
     LayoutReport,
     apply_layout,
     legend_labels,
@@ -429,14 +430,14 @@ def render_point(
         ax.add_artist(size_legend)
 
     # --- 版式要素 + 断点图例 ---
-    # 指北针移到图框外右侧，避免收窄取景后数据点落在右上角与指北针重叠。
+    # 点图图例在框外，数据点可能铺满图幅；指北针按框外左右候选依次避让。
     layout = apply_layout(
         fig,
         ax,
         spec,
         unit=unit,
         legend_anchor=(1.02, 1.0),
-        north_arrow_anchor=(-0.12, 0.95),
+        north_arrow_candidates=_POINT_NORTH_ARROW_CANDIDATES,
         extra_note=extra_note,
     )
 
