@@ -8,13 +8,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import geopandas as gpd
-import pytest
-from shapely.geometry import Point, box
+import matplotlib
+
+matplotlib.use("Agg")
+
+import geopandas as gpd  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import pytest  # noqa: E402
+from shapely.geometry import Point, box  # noqa: E402
 
 from mapsmith import flow
 from mapsmith.io.models import CrsNotDeclared, DataError, DataLayer, FieldMissing
 from mapsmith.io.uploads import parse_upload
+from mapsmith.render.choropleth import render_choropleth
 from mapsmith.tools.inspect import DataProfile
 from mapsmith.ui import RenderResult
 
@@ -534,3 +540,61 @@ def test_compose_spec_forces_aqi_national_six_classes():
 
     verdict = flow.review_fn(spec, png="not-none")
     assert verdict["passed"] is True
+
+
+def test_load_overlay_base_returns_demo_boundary() -> None:
+    """T25：上传面作为主体时，第二图层应取自 demo_data 边界。"""
+    base = flow._load_overlay_base("徐州")
+    assert base is not None
+    assert base.kind == "admin"
+    assert "徐州市" in base.name
+    assert flow._load_overlay_base("不存在的城市") is None
+
+
+def test_form_spec_overlay_reports_demo_as_second_layer() -> None:
+    loaded = make_loaded()
+    surface = DataLayer(
+        kind="admin",
+        name="上传面",
+        source="upload",
+        summary="2 个面",
+        gdf=gpd.GeoDataFrame(
+            {"name": ["面A", "面B"], "PM2_5_24h": [50.0, 60.0]},
+            geometry=[
+                box(117.1, 34.1, 117.25, 34.25),
+                box(117.25, 34.25, 117.4, 34.4),
+            ],
+            crs="EPSG:4326",
+        ),
+        crs="EPSG:4326",
+        meta={"adcode": "320300"},
+    )
+    loaded["layer"] = surface
+    loaded["admin"] = surface
+    loaded["overlay_base"] = make_admin()
+
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "overlay", "overlay_op": "clip", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    assert any("第二图层：徐州市行政边界" in note for note in spec.notes)
+
+
+def test_buffer_legend_title_includes_radius_and_sites() -> None:
+    """SPEC 3.1：buffer 图的图例需注明半径与参与站点数。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "buffer", "buffer_km": "5", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    render_choropleth(spec, loaded["analysis_layer"].gdf, field="buffer_value")
+    legend = plt.gcf().axes[0].get_legend()
+    assert legend is not None
+    title = legend.get_title().get_text()
+    assert "缓冲距离 5 km" in title
+    assert "面含站点" in title
+    plt.close("all")

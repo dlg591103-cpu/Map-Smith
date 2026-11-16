@@ -297,6 +297,20 @@ def _surface_profile(layer: DataLayer, field_name: str) -> SurfaceProfile:
     )
 
 
+def _load_overlay_base(place: str) -> DataLayer | None:
+    """overlay 的第二图层：所选区域的 demo_data 边界；无边界时返回 None。
+
+    上传面作为主体时 `admin` 必须是上传面本身（choropleth 的分级对象），
+    不能同时充当第二图层，否则 clip / intersection 会变成对主体自我运算。
+    """
+    if not _clean(place):
+        return None
+    try:
+        return load_admin(place, online=False)
+    except DataError:
+        return None
+
+
 def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dict[str, Any]:
     place = request["place"]
     date = request["time"]
@@ -329,6 +343,7 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
                 "reason_lines": list(profile.reason_lines),
                 "profile": profile,
                 "admin": layer,
+                "overlay_base": _load_overlay_base(place),
                 "points": None,
                 "layer": layer,
                 "field": field_name,
@@ -520,7 +535,7 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
         analysis, spec_field, extra_notes = _analysis_layer_for(
             map_type,
             layer=layer,
-            admin=loaded.get("admin"),
+            admin=loaded.get("overlay_base") or loaded.get("admin"),
             points=loaded.get("points"),
             field_name=field_name,
             buffer_km=draft.get("buffer_km"),
@@ -673,7 +688,7 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
         analysis, spec_field, extra_notes = _analysis_layer_for(
             map_type,
             layer=layer,
-            admin=loaded.get("admin"),
+            admin=loaded.get("overlay_base") or loaded.get("admin"),
             points=loaded.get("points"),
             field_name=field_name,
             buffer_km=form.get("buffer_km"),
