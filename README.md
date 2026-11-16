@@ -1,45 +1,269 @@
 # Map Smith
 
-本目录是 Map Smith 的项目根目录，同时是项目的 Git 仓库，用于集中管理产品事实、任务规格、工程规则与应用源码。
+> 说一句话，出一张符合制图规范的专题地图。
 
-> 产品用途、用户角色、使用流程等产品信息尚未确认。确认后的内容只记录在 [`docs/facts/`](docs/facts/)，本文档不重复保存产品内容。
+[![Release](https://img.shields.io/github/v/release/dlg591103-cpu/Map-Smith?label=release)](https://github.com/dlg591103-cpu/Map-Smith/releases/latest)  
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)  
+[![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)  
+[![Docs](https://img.shields.io/badge/docs-%E4%BA%A7%E5%93%81%E4%BA%8B%E5%AE%9E%E4%B8%8E%20SPEC-2F6F4E)](docs/)
 
-## 目录用途
+[English](README.en.md) | 简体中文
 
-| 路径 | 用途 |
+Map Smith 是一个**自然语言专题制图智能体**。输入一句话（或上传一份点位 / 统计数据），输出一张可直接进入报告和论文的成品专题图（PNG / PDF），并附制图说明与合规审查意见。
+
+它面向**需要一张图但不会 GIS 的人**——记者、教师、基层业务人员、规划院新人、学生。核心差异不是「画一张图」，而是「按制图学规范出一张图」：图名、图例、比例尺、指北针、数据来源、投影与分级方法都会按规则补齐并接受审查。
+
+![Map Smith 生成的徐州市 PM2.5 分级设色图](docs/assets/example-choropleth.png)
+
+*示例输出：徐州市 PM2.5 分布图（2026-11-01），由 Map Smith 的分级设色流程实际生成。*
+
+## 目录
+
+-   [为什么用它](#%E4%B8%BA%E4%BB%80%E4%B9%88%E7%94%A8%E5%AE%83)
+-   [核心能力](#%E6%A0%B8%E5%BF%83%E8%83%BD%E5%8A%9B)
+-   [快速开始](#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
+-   [使用方法](#%E4%BD%BF%E7%94%A8%E6%96%B9%E6%B3%95)
+-   [工作流程](#%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B)
+-   [技术架构](#%E6%8A%80%E6%9C%AF%E6%9E%B6%E6%9E%84)
+-   [数据与离线兜底](#%E6%95%B0%E6%8D%AE%E4%B8%8E%E7%A6%BB%E7%BA%BF%E5%85%9C%E5%BA%95)
+-   [适用范围与边界](#%E9%80%82%E7%94%A8%E8%8C%83%E5%9B%B4%E4%B8%8E%E8%BE%B9%E7%95%8C)
+-   [项目结构](#%E9%A1%B9%E7%9B%AE%E7%BB%93%E6%9E%84)
+-   [开发与测试](#%E5%BC%80%E5%8F%91%E4%B8%8E%E6%B5%8B%E8%AF%95)
+
+## 为什么用它
+
+GIS 的「最后一公里」：需要一张图的人，远多于会用 GIS 的人。现状通常只有两条路——学 ArcGIS（贵、难、装不上），或找人代做（几十到几百元、要等）。
+
+Map Smith 提供第三条路：用日常语言描述需求，几分钟内拿到一张要素齐全、来源可追溯、经过规则审查的专题图。
+
+## 核心能力
+
+| 能力 | 说明 |
 | --- | --- |
-| [`docs/facts/`](docs/facts/) | 产品唯一事实文档。按主题拆分，每份文档负责一个明确主题；同一项事实只在一个位置维护，其他文档链接引用。目前尚未建立文档 |
-| [`docs/Spec/`](docs/Spec/) | 每个版本或开发任务的 SPEC（需求规格说明书）。记录目标、修改范围、预期行为、必要依赖与验收条件。目前尚无开发任务 |
-| [`docs/工程规则.md`](docs/%E5%B7%A5%E7%A8%8B%E8%A7%84%E5%88%99.md) | 工程规则的唯一正文，涵盖分支与基线、SPEC 先行、自检与独立验收、合并与上线、文档同步、证据与清理、仓库与远端 |
-| [`src/`](src/) | 应用源码目录。源码、依赖声明、锁文件、测试及构建运行所需文件都放在这里；技术方案确定后再建立内部结构 |
-| [`.gitignore`](.gitignore) | 项目级忽略规则，排除密钥、真实用户数据、依赖缓存、构建结果与临时文件，对 `src/` 子树同样生效 |
-| [`.gitattributes`](.gitattributes) | 换行符与二进制文件规则，统一以 LF 存取 |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献入口：Fork + PR 的操作步骤；分支、自检与合并规则引用 [`docs/工程规则.md`](docs/%E5%B7%A5%E7%A8%8B%E8%A7%84%E5%88%99.md) |
-| [`docs/协作邀请说明.md`](docs/%E5%8D%8F%E4%BD%9C%E9%82%80%E8%AF%B7%E8%AF%B4%E6%98%8E.md) | 新协作者上手说明：阅读顺序、认领任务、环境与交付 |
-| [`.github/`](.github/) | PR 模板、Issue 模板与 CODEOWNERS |
-| [`docs/GitHub仓库设置清单.md`](docs/GitHub%E4%BB%93%E5%BA%93%E8%AE%BE%E7%BD%AE%E6%B8%85%E5%8D%95.md) | 维护者执行 GitHub 网页设置的逐步清单 |
-| [`AGENTS.md`](AGENTS.md) | AI 开始工作时的阅读入口和资料索引 |
+| 一句话出图 | 说出区域、时间、指标即可出图；信息不足时反问，一次最多 2 个问题，不猜默认值 |
+| 五类专题图 | 分级设色图、点图 / 气泡图、缓冲区分析图、空间叠加 / 裁剪图、IDW 空间插值面 |
+| 按规范出图 | 图名、图例分级与单位、比例尺、指北针、数据来源与更新时间、坐标系、分级方法、缺失值说明 |
+| 合规审查 | 审图员按 10 条确定性硬规则判定 PASS / FAIL，不合格自动返工（最多 2 轮），不会无限循环 |
+| 可解释、可修改 | 所有决策沉淀为一份 `MapSpec` JSON；改一个字段即可重渲染，几秒出新图 |
+| 离线可用 | 内置徐州全量演示数据，断网也能演示；不依赖在线底图服务 |
+| 多格式输入 | CSV、GeoJSON、Shapefile（zip）、GeoTIFF 底图；坐标系统一校验并要求显式确认 |
 
-## 文档入口
+## 快速开始
 
--   产品事实：从 [`docs/facts/`](docs/facts/) 开始，按主题查阅；尚未建立时以用户新的确认为准，不自行补写。
--   任务规格：从 [`docs/Spec/`](docs/Spec/) 找到当前任务的 SPEC；没有确认的 SPEC 不进入实现。
--   工程要求：以 [`docs/工程规则.md`](docs/%E5%B7%A5%E7%A8%8B%E8%A7%84%E5%88%99.md) 为准，其他文件只引用，不重复维护。
--   AI 协作：阅读 [`AGENTS.md`](AGENTS.md) 获取必读资料与阅读顺序。
+运行需要 **Python 3.12+**。三种方式任选其一。
 
-## 当前状态
+### 方式一：下载即用（推荐）
 
--   项目骨架已建立并纳入版本控制：`README.md`、`AGENTS.md`、`docs/`、`src/`。
--   产品事实文档：已建立 8 份（产品定义、范围与边界、架构原则、三 Agent 协议、MapSpec 与工具契约、数据源、制图规范、交付形态），位于 [`docs/facts/`](docs/facts/)。
--   SPEC：[`docs/Spec/V0.1-专题制图智能体.md`](docs/Spec/V0.1-专题制图智能体.md)，状态为已确认（2026-11-05），按 SPEC 第 6.1 节的任务分支开发。
--   `src/`：技术栈为 Python 3.12 + geopandas / matplotlib / mapclassify + Vue 3 / FastAPI（T22 第二段起移除 Streamlit）。T01–T23 已完成：环境与依赖锁、骨架与配置、MapSpec 与校验、投影选带、数据解析与上传（CSV / GeoJSON / Shapefile zip）、GeoTIFF 底图、离线 demo_data、体检与两档插值判定、classify / analyze、四类渲染与版式要素、审图规则库与 `qa_check`、三 Agent 编排与返工兜底、Vue + FastAPI 界面、打包（`run.ps1` / `run.sh` / `Dockerfile` / `docker-compose.yml`）。自检与验收记录分别见 [`docs/自检/`](docs/自检/)、[`docs/验收/`](docs/验收/)。T24 端到端验收记录已订正；T25 五图种与默认 LLM、PR #27 v0.1.1 集成 A1/A2 修复均已通过独立验收/复验；v0.1.1 已合并（`dac1a72`）并在 GitHub 发布。
--   远端仓库：`https://github.com/dlg591103-cpu/Map-Smith`（公开），`main` 跟踪 `origin/main`；外部贡献者通过 Fork + PR 参与，入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
--   多人协作：仓库已公开，`PINGNINGYI` 已作为协作者加入并具备 Write 权限。`main` 已启用 Rulesets 保护（要求 PR、1 个批准、Code Owner 评审、禁止强推与删除）；bypass list 仅含仓库拥有者 `dlg591103-cpu`（`For pull requests only`），拥有者可自行合并自己的 PR，其余账号仍需批准。实测：PR #4 经 bypass 以 Squash 合并，`main` 为 `40a680b`。经典保护下已实测：协作者可推送分支并发起 PR、直推 `main` 被拒绝（protected branch / GH006）、未获批准时合并被阻止。PR 模板自动填充尚待下一次建 PR 时确认。
--   审图员（SPEC T19 / 需求单 T12 Reviewer）：`tools/qa_check.py` 十条硬规则、`agents/reviewer.py` 返工契约、`kb/reviewer_rules.json` 与审图 prompt 已完成，自检见 [`docs/自检/T19-reviewer-自检记录.md`](docs/自检/T19-reviewer-自检记录.md)。
--   T22 第二段（2026-11-10）：界面从 Streamlit 换为 Vue 3 + Vite（`web/`，`dist/` 入库）+ FastAPI（`src/mapsmith/server.py`），一句话与表单都经 `loop.run`；SPEC 见 [`docs/Spec/T22-一句话入口与loop接入.md`](docs/Spec/T22-一句话入口与loop接入.md)，自检见 [`docs/自检/T22-界面-第二段.md`](docs/自检/T22-界面-第二段.md)。
--   T23 打包（2026-11-16）：`run.ps1`（Windows 一键启动）、`run.sh`（Linux / macOS）、`Dockerfile`、`docker-compose.yml`、`.dockerignore`；独立验收通过，记录见 [`docs/验收/T23.md`](docs/验收/T23.md)。GitHub Release **v0.1.0** 已发布，附 `mapsmith-v0.1.0.zip`：<https://github.com/dlg591103-cpu/Map-Smith/releases/tag/v0.1.0>。**v0.1.1 已发布**，附 `mapsmith-v0.1.1.zip`：<https://github.com/dlg591103-cpu/Map-Smith/releases/tag/v0.1.1>。
+1.  打开 [Releases](https://github.com/dlg591103-cpu/Map-Smith/releases/latest)，下载最新的 `mapsmith-v0.1.1.zip`。
+2.  解压到任意目录。
+3.  在解压后的根目录启动：
+    -   Windows PowerShell：`.\run.ps1`
+    -   macOS / Linux：`./run.sh`
+4.  浏览器打开 [http://127.0.0.1:8501](http://127.0.0.1:8501)。
 
-## 版本管理约定
+首次运行会自动创建 `.venv` 并按 `src/requirements.lock` 安装依赖，需要几分钟。若 Windows 执行策略阻止脚本，改用：
 
--   项目根目录是唯一仓库，`main` 为稳定分支；`src/`、`docs/` 与根目录文件同库管理、同远端同步。
--   分支、提交、自检、验收与合并流程见 [`docs/工程规则.md`](docs/%E5%B7%A5%E7%A8%8B%E8%A7%84%E5%88%99.md)。
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+```
+
+自定义监听地址与端口：
+
+```powershell
+.\run.ps1 -Port 9000 -BindHost 0.0.0.0   # Windows
+./run.sh --port 9000 --host 0.0.0.0      # macOS / Linux
+```
+
+### 方式二：Docker
+
+不装 Python 也能运行：
+
+```bash
+docker compose up --build
+```
+
+浏览器打开 [http://127.0.0.1:8501](http://127.0.0.1:8501)。产物（PNG / PDF）会写入宿主机 `out/` 目录。
+
+### 方式三：从源码运行
+
+```bash
+git clone https://github.com/dlg591103-cpu/Map-Smith.git
+cd Map-Smith
+```
+
+然后直接执行 `.\run.ps1`（Windows）或 `./run.sh`（macOS / Linux），或手动启动：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r src\requirements.lock
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe -m mapsmith --port 8501
+```
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r src/requirements.lock
+PYTHONPATH=src ./.venv/bin/python -m mapsmith --port 8501
+```
+
+前端构建产物 `web/dist/` 已入库，运行时不需要 Node。只有修改前端时才需要进入 `web/` 执行 `npm install && npm run dev`。
+
+### 配置大模型（可选）
+
+默认使用本机 [Ollama](https://ollama.com/)（`http://127.0.0.1:11434/v1`，模型 `qwen2.5:3b`）。使用一句话模式前，先启动 Ollama 并拉取模型：
+
+```bash
+ollama pull qwen2.5:3b
+```
+
+也可以接入任意 OpenAI 兼容 API。在项目根目录创建 `.env`：
+```
+MAPSMITH_LLM_BASE_URL=https://your-provider.example/v1
+MAPSMITH_LLM_API_KEY=your-api-key
+MAPSMITH_LLM_MODEL=your-model-name
+```
+
+未配置或模型不可用时，界面会给出中文提示，仍可用表单模式 + 内置离线数据出图。
+
+## 使用方法
+
+### 一句话模式
+
+在对话框里描述需求，例如：
+
+```text
+徐州市 2026-11-01 的 PM2.5 分布图
+```
+
+系统会解析区域、时间与指标，完成数据加载、体检、出图和审查。缺少必要信息时会反问你（最多 2 个问题），不会擅自套用默认值。提到「缓冲」或「叠加 / 裁剪」时，会按关键词选择对应图种。
+
+### 表单模式
+
+在表单中选择区域、时间、指标、图种，并按需上传数据；适合需要精确控制输入的场景。
+
+上传格式：
+
+| 类型 | 格式 | 说明 |
+| --- | --- | --- |
+| 矢量 | Shapefile（`.shp` / `.shx` / `.dbf` / `.prj` 打成 zip）、GeoJSON、CSV（UTF-8） | Shapefile 必须整体上传，不能只传 `.shp` |
+| 栅格 | GeoTIFF | 仅作离线底图显示，不做栅格分析与重投影 |
+
+文件未声明坐标系时会弹窗要求确认，不会静默默认 WGS84。
+
+### 输出
+
+每次出图返回：
+
+-   成品图：PNG / PDF
+-   制图说明：数据来源、更新时间、坐标系、分级方法与缺失值说明
+-   审查意见：10 条规则的逐条判定结果与修复建议
+-   `MapSpec`：本次制图的完整决策记录
+
+## 工作流程
+```mermaid
+flowchart LR
+    A[一句话 / 表单<br/>+ 可选数据文件] --> B[DataSteward<br/>解析需求、加载数据、数据体检]
+    B --> C[Cartographer<br/>生成完整 MapSpec]
+    C --> D[渲染层<br/>确定性代码出图]
+    D --> E[Reviewer<br/>10 条硬规则审查]
+    E -- PASS --> F[PNG / PDF<br/>+ 制图说明 + 审查意见]
+    E -- FAIL --> C
+```
+
+-   信息不足时不猜默认值，先反问（最多 2 问）。
+-   数据不满足插值条件时自动降级：站点数与覆盖率不足则降为点图 / 气泡图，并写明理由。
+-   审查不合格最多返工 2 轮；仍不通过则照常出图并附审查意见，不抛错误页、不返回空白图。
+-   全局最长 60 秒，超时用当前 `MapSpec` 出图，并在图上标注「审查未完成（超时）」。
+
+## 技术架构
+```
+用户一句话（+ 可选数据文件）
+        │
+        ▼
+① 编排层：三 Agent 循环（对话 / 决策 / 返工）
+        │ 产物
+        ▼
+② 决策层：MapSpec（JSON）
+   图种 / 分级方法 / 配色 / 注记 / 版式 / 数据源声明
+        │
+        ▼
+③ 渲染层：确定性代码把 spec 变成图（不含任何 LLM）
+        │
+        ▼
+PNG / PDF + 制图说明 + 审查意见
+```
+
+**LLM 只做决策，不做计算、不写绘图代码。** 分级由 `mapclassify` 计算，出图由 `matplotlib` 绘制，LLM 只负责「选哪种方法、为什么选」。这让结果可解释、可增量修改、可测试。
+
+| 角色 | 职责 |
+| --- | --- |
+| DataSteward | 解析意图、生成数据需求、加载数据、数据体检与降级判定 |
+| Cartographer | 依据数据与需求产出完整 `MapSpec`（分级、配色、版式、注记） |
+| Reviewer | 按制图规范逐条判定 PASS / FAIL，给修复建议；不改数据、不代画 |
+
+技术栈：Python 3.12 + geopandas / shapely / pyproj / mapclassify / matplotlib + FastAPI；前端 Vue 3 + Vite（构建产物入库）。
+
+## 数据与离线兜底
+
+| 数据 | 来源 | 备注 |
+| --- | --- | --- |
+| 行政边界 | 阿里 DataV GeoAtlas | 免费；GCJ-02 加载时纠偏到 WGS84 |
+| 空气质量 | [quotsoft.net](http://quotsoft.net) 全国站点 CSV | 含经纬度，可直接做空间插值 |
+| POI / 路网 | OSM Overpass API | 免费、无需 key |
+| 离线兜底 | 内置 `src/mapsmith/demo_data/`（徐州，2026-11-01） | 断网也能演示 |
+| 用户上传 | CSV / GeoJSON / Shapefile(zip)，可附加 GeoTIFF 底图 | 坐标系规则见文档 |
+
+在线接口在受限网络下可能不可达；此时使用内置离线数据，功能与审查流程不受影响。不接入在线底图服务，避免现场演示依赖网络。
+
+默认输出坐标系为 **CGCS2000（EPSG:4490）**；也支持 CGCS2000 3° 高斯-克吕格（自动选带）、WGS84 UTM（自动选带）与 Web Mercator（仅显示）。
+
+## 适用范围与边界
+
+Map Smith 做**通用专题制图**，不承诺专业测绘精度。
+
+明确支持五种图种，且封顶不再扩展：
+
+1.  分级设色图（choropleth）
+2.  点图 / 气泡图（含站点标注）
+3.  缓冲区分析图（buffer）
+4.  空间叠加 / 裁剪结果图（overlay / clip）
+5.  IDW 空间插值面（仅当站点数与覆盖率通过自适应判定时启用）
+
+明确不做：
+
+-   栅格分析（裁剪、拉伸、重采样等），仅支持栅格底图显示
+-   地图服务发布
+-   数据管理平台
+-   自定义投影定义与参数微调
+
+每张图强制标注数据来源与更新时间；输入可声明任意 CRS 并显式确认，输出限白名单投影。
+
+## 项目结构
+
+```text
+.
+├── src/mapsmith/          # 后端：agents / io / render / tools / kb / demo_data
+├── src/tests/             # pytest 测试
+├── web/                   # Vue 3 + Vite 前端源码（dist/ 为入库的构建产物）
+├── docs/                  # 产品事实、SPEC、自检、验收、工程规则
+├── run.ps1 / run.sh       # 一键启动（Windows / macOS / Linux）
+├── Dockerfile             # 容器镜像
+├── docker-compose.yml     # 容器编排（端口 8501）
+├── package.py             # 生成发行 zip
+└── README.en.md           # English README
+```
+
+## 开发与测试
+
+```bash
+cd src
+python -m pytest
+```
+
+测试覆盖 MapSpec 校验、投影选带、数据解析与上传、分级与渲染、审图规则、三 Agent 编排、FastAPI 接口等。前端开发见 [`web/README.md`](web/README.md)。
+
+打包发行 zip：
+
+```bash
+python package.py
+```
