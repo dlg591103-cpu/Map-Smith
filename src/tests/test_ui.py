@@ -93,8 +93,8 @@ def test_build_spec_breaks_count_mismatch_raises_readable_error() -> None:
 
 
 def test_build_spec_unsupported_map_type_raises() -> None:
-    with pytest.raises(DataError, match="buffer / overlay 尚未实现"):
-        build_spec(make_fields("buffer", breaks=[40, 50], n=2))
+    with pytest.raises(DataError, match="不受支持"):
+        build_spec(make_fields("raster", breaks=[40, 50], n=2))
 
 
 def test_build_spec_missing_title_raises() -> None:

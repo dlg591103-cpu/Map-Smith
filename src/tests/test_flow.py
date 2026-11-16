@@ -8,13 +8,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import geopandas as gpd
-import pytest
-from shapely.geometry import Point, box
+import matplotlib
+
+matplotlib.use("Agg")
+
+import geopandas as gpd  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import pytest  # noqa: E402
+from shapely.geometry import Point, box  # noqa: E402
 
 from mapsmith import flow
 from mapsmith.io.models import CrsNotDeclared, DataError, DataLayer, FieldMissing
 from mapsmith.io.uploads import parse_upload
+from mapsmith.render.choropleth import render_choropleth
 from mapsmith.tools.inspect import DataProfile
 from mapsmith.ui import RenderResult
 
@@ -140,6 +146,21 @@ def test_normalize_parse_prefers_model_questions_and_limits_to_two():
     )
 
     assert parsed.questions == ["要哪一天的？", "画哪个指标？"]
+
+
+def test_normalize_parse_ignores_questions_when_fields_complete():
+    """三项齐全时不再反问：模型多余的 questions 不应阻断出图（T25）。"""
+    parsed = flow.normalize_parse(
+        {
+            "place": "徐州",
+            "time": "2026-11-01",
+            "metric": "PM2.5",
+            "questions": ["想画哪个城市或区县？", "要哪一天的数据？"],
+        }
+    )
+
+    assert parsed.request == {"place": "徐州", "time": "2026-11-01", "metric": "PM2_5_24h"}
+    assert parsed.questions == []
 
 
 def test_parse_request_uses_data_steward_prompt():
@@ -354,6 +375,54 @@ class FakeRender:
         return RenderResult(png_path=png, pdf_path=pdf, report=None)
 
 
+def test_form_spec_builds_buffer_spec():
+    """T25：buffer 走确定性分析，spec 字段为 buffer_value，结果面图层交给渲染。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "buffer", "buffer_km": "5", "method": "quantile", "n": 5},
+        loaded,
+    )
+
+    assert spec.map_type == "buffer"
+    assert spec.layers[0].kind == "buffer"
+    assert spec.layers[0].field == "buffer_value"
+    assert loaded["analysis_layer"].kind == "buffer"
+    assert any("缓冲距离" in note for note in spec.notes)
+
+
+def test_compose_spec_uses_buffer_when_draft_asks():
+    """T25：一句话模式下制图师可指定 buffer，系统做确定性分析并写回字段。"""
+    loaded = make_loaded()
+    spec = flow._compose_spec(
+        request(),
+        loaded,
+        {
+            "map_type": "buffer",
+            "buffer_km": 5,
+            "title": "徐州市PM2.5 2026-11-01图",
+            "classification": {"method": "quantile", "n": 5},
+            "palette": {"scheme": "YlOrRd"},
+        },
+    )
+
+    assert spec.map_type == "buffer"
+    assert spec.layers[0].kind == "buffer"
+    assert spec.layers[0].field == "buffer_value"
+    assert loaded["analysis_layer"].kind == "buffer"
+    assert any("缓冲距离" in note for note in spec.notes)
+
+
+def test_form_spec_rejects_overlay_without_face_layer():
+    loaded = make_loaded()
+    with pytest.raises(DataError, match="上传面图层"):
+        flow._form_spec(
+            flow.RequestParse(request()),
+            {"map_type": "overlay", "overlay_op": "clip"},
+            loaded,
+        )
+
+
 def test_run_form_goes_through_loop(monkeypatch, tmp_path: Path):
     loaded = make_loaded()
     fake_render = FakeRender(tmp_path)
@@ -471,3 +540,203 @@ def test_compose_spec_forces_aqi_national_six_classes():
 
     verdict = flow.review_fn(spec, png="not-none")
     assert verdict["passed"] is True
+
+
+def test_load_overlay_base_returns_demo_boundary() -> None:
+    """T25：上传面作为主体时，第二图层应取自 demo_data 边界。"""
+    base = flow._load_overlay_base("徐州")
+    assert base is not None
+    assert base.kind == "admin"
+    assert "徐州市" in base.name
+    assert flow._load_overlay_base("不存在的城市") is None
+
+
+def test_form_spec_overlay_reports_demo_as_second_layer() -> None:
+    loaded = make_loaded()
+    surface = DataLayer(
+        kind="admin",
+        name="上传面",
+        source="upload",
+        summary="2 个面",
+        gdf=gpd.GeoDataFrame(
+            {"name": ["面A", "面B"], "PM2_5_24h": [50.0, 60.0]},
+            geometry=[
+                box(117.1, 34.1, 117.25, 34.25),
+                box(117.25, 34.25, 117.4, 34.4),
+            ],
+            crs="EPSG:4326",
+        ),
+        crs="EPSG:4326",
+        meta={"adcode": "320300"},
+    )
+    loaded["layer"] = surface
+    loaded["admin"] = surface
+    loaded["overlay_base"] = make_admin()
+
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "overlay", "overlay_op": "clip", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    assert any("第二图层：徐州市行政边界" in note for note in spec.notes)
+
+
+def test_buffer_legend_title_includes_radius_and_sites() -> None:
+    """SPEC 3.1：buffer 图的图例需注明半径与参与站点数。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "buffer", "buffer_km": "5", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    render_choropleth(spec, loaded["analysis_layer"].gdf, field="buffer_value")
+    legend = plt.gcf().axes[0].get_legend()
+    assert legend is not None
+    title = legend.get_title().get_text()
+    assert "缓冲距离 5 km" in title
+    assert "面含站点" in title
+    plt.close("all")
+
+
+def test_map_type_hint_reads_buffer_distance_from_text() -> None:
+    assert flow._map_type_hint("用徐州 2026-11-01 的 PM2.5 做 5 公里缓冲区分析") == (
+        "buffer",
+        {"buffer_km": 5.0},
+    )
+    assert flow._map_type_hint("做 3.5km 缓冲区") == ("buffer", {"buffer_km": 3.5})
+    assert flow._map_type_hint("画徐州点图") is None
+
+
+def test_map_type_hint_reads_overlay_operation() -> None:
+    assert flow._map_type_hint("做裁剪叠加分析") == ("overlay", {"overlay_op": "clip"})
+    assert flow._map_type_hint("做 intersection 相交分析") == (
+        "overlay",
+        {"overlay_op": "intersection"},
+    )
+
+
+def test_llm_map_fn_overrides_map_type_by_user_text() -> None:
+    """原话点名缓冲时，即使模型输出 point，也要按 buffer 出图。"""
+
+    def fake_llm(_prompt, _payload):
+        return {
+            "map_type": "point",
+            "classification": {"method": "quantile", "n": 2},
+            "palette": {"scheme": "YlOrRd"},
+        }
+
+    loaded = make_loaded()
+    map_fn = flow._make_llm_map_fn(
+        flow.RequestParse(request()),
+        llm_callable=fake_llm,
+        user_text="用徐州 2026-11-01 的 PM2.5 做 5 公里缓冲区分析",
+    )
+    spec = map_fn(loaded)
+
+    assert spec.map_type == "buffer"
+    assert loaded["analysis_layer"].kind == "buffer"
+
+
+# --- T25 复验：图幅范围与体检结论注记 ---------------------------------------
+
+
+def make_surface() -> DataLayer:
+    """上传面作为 overlay 主体：只覆盖局部小面。"""
+    return DataLayer(
+        kind="admin",
+        name="上传面",
+        source="upload",
+        summary="2 个面",
+        gdf=gpd.GeoDataFrame(
+            {"name": ["面A", "面B"], "PM2_5_24h": [50.0, 60.0]},
+            geometry=[box(117.12, 34.15, 117.2, 34.22), box(117.25, 34.25, 117.33, 34.32)],
+            crs="EPSG:4326",
+        ),
+        crs="EPSG:4326",
+        meta={"adcode": "320300"},
+    )
+
+
+def test_form_spec_buffer_notes_drop_point_degrade_conclusion():
+    """buffer 按用户图种渲染，注记不应写「降级为点图」。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "buffer", "buffer_km": "5", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    assert not any("降级为点图" in note for note in spec.notes)
+    assert any("站数" in note for note in spec.notes)
+    assert any("缓冲距离" in note for note in spec.notes)
+
+
+def test_form_spec_choropleth_notes_drop_point_degrade_conclusion():
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "choropleth", "method": "quantile", "n": 3},
+        loaded,
+    )
+
+    assert spec.map_type == "choropleth"
+    assert not any("降级为点图" in note for note in spec.notes)
+
+
+def test_form_spec_point_keeps_degrade_conclusion():
+    """点图确实由 degrade 决定，结论行保留。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "point", "method": "quantile", "n": 3},
+        loaded,
+    )
+
+    assert any("降级为点图" in note for note in spec.notes)
+
+
+def test_compose_spec_buffer_drops_point_degrade_conclusion():
+    """一句话点名缓冲时，结论行同样不应写「降级为点图」。"""
+    loaded = make_loaded()
+    spec = flow._compose_spec(
+        request(),
+        loaded,
+        {
+            "map_type": "buffer",
+            "buffer_km": 5,
+            "classification": {"method": "quantile", "n": 2},
+            "palette": {"scheme": "YlOrRd"},
+        },
+    )
+
+    assert not any("降级为点图" in note for note in spec.notes)
+
+
+def test_overlay_spec_uses_region_extent_not_upload_extent():
+    """overlay 图幅取第二图层范围，不随局部上传主体缩到满幅。"""
+    loaded = make_loaded()
+    surface = make_surface()
+    loaded["layer"] = surface
+    loaded["admin"] = surface
+    loaded["overlay_base"] = make_admin()
+
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "overlay", "overlay_op": "clip", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    assert spec.extent.bbox == loaded["overlay_base"].bbox_wgs84()
+    assert not any("降级为点图" in note for note in spec.notes)
+
+
+def test_ensure_title_requires_region_suffix_for_r01():
+    """R01 要求区域带行政区后缀；模型只写「徐州」时回退本地标题。"""
+    assert (
+        flow._ensure_title("徐州 PM2.5 分布图（2026-11-01）", "徐州", "PM2_5_24h", "2026-11-01")
+        == "徐州市 PM2.5 分布图（2026-11-01，μg/m³）"
+    )
+    kept = "徐州市 PM2.5 分布图（2026-11-01，μg/m³）"
+    assert flow._ensure_title(kept, "徐州", "PM2_5_24h", "2026-11-01") == kept

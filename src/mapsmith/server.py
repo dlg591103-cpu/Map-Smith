@@ -51,6 +51,9 @@ class FormBody(BaseModel):
     label_field: str | None = None
     show_label: bool = False
     upload_id: str | None = None
+    # T25：buffer / overlay 参数
+    buffer_km: str | None = None
+    overlay_op: str | None = None
 
 
 class CrsBody(BaseModel):

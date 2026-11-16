@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -244,12 +246,11 @@ def test_render_dispatches_by_map_type() -> None:
 
 
 def test_render_unimplemented_map_type_raises() -> None:
-    spec = make_point_spec(
-        map_type="buffer",
-        layers=[Layer(id="data", kind="buffer", field="pm25")],
-    )
+    spec = make_point_spec(layers=[Layer(id="data", kind="point", field="pm25")])
+    # T25 起五种图种均已实现；用绕过校验的未知图种确认兜底分支仍会抛错。
+    bogus = spec.model_copy(update={"map_type": "raster"})
     with pytest.raises(NotImplementedError, match="尚未实现"):
-        render(spec, make_point_gdf([30, 45]))
+        render(bogus, make_point_gdf([30, 45]))
     plt.close("all")
 
 
@@ -293,4 +294,42 @@ def test_render_point_draws_admin_background() -> None:
         background_gdf=background,
     )
     assert report.background is True
+    plt.close("all")
+
+
+def test_labels_avoid_bubbles_and_each_other() -> None:
+    """标注位置应避开气泡与其他标签，不靠固定偏移硬贴。"""
+    labels = ["站点A", "站点B", "站点C", "站点D", "站点E"]
+    spec = make_point_spec(annotation=Annotation(label_field="name", show=True))
+    render_point(spec, make_point_gdf([30, 45, 55, 65, 80], labels=labels))
+
+    fig = plt.gcf()
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    ax = fig.axes[0]
+    texts = sorted((t for t in ax.texts if t.get_text().startswith("站点")), key=lambda t: t.get_text())
+    assert len(texts) == len(labels)
+    boxes = [t.get_window_extent(renderer) for t in texts]
+
+    # 1) 标签之间不重叠
+    for index, first in enumerate(boxes):
+        for second in boxes[index + 1 :]:
+            assert not first.overlaps(second), f"标签互相压盖：{first} / {second}"
+
+    # 2) 标签不压在任何气泡上
+    scatter = [
+        collection
+        for collection in ax.collections
+        if hasattr(collection, "get_sizes") and len(collection.get_sizes()) == len(labels)
+    ][-1]
+    centers = ax.transData.transform(scatter.get_offsets())
+    radii = [math.sqrt(float(size)) / 2.0 * fig.dpi / 72.0 for size in scatter.get_sizes()]
+    for box in boxes:
+        for (cx, cy), radius in zip(centers, radii):
+            assert (
+                box.x1 <= cx - radius
+                or box.x0 >= cx + radius
+                or box.y1 <= cy - radius
+                or box.y0 >= cy + radius
+            ), f"标签压在气泡上：{box} / 圆心 ({cx:.1f}, {cy:.1f}) 半径 {radius:.1f}"
     plt.close("all")

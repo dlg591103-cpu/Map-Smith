@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import geopandas as gpd
+import pandas as pd
 
 # 数据层图种：与 docs/facts/05 的 Layer.kind 保持同名，便于直接对照。
 LayerKind = Literal["admin", "point", "raster", "table"]
@@ -71,6 +72,8 @@ class DataLayer:
     """一次加载的结果。
 
     - `gdf`：地理数据；`kind="table"` 时为 None（统计表不带几何）。
+    - `table`：无几何统计表的数据行；`kind="table"` 时保存解析后的 DataFrame，
+      供 `analyze.join` 关联到行政区（T14 契约缺口修复，2026-11-16）。
     - `source`：数据来源的简短标识，用于 MapSpec 的 data_source_note。
     - `meta`：补充信息（时间、CRS 来源、字段映射、待确认项等），可序列化为 JSON。
     """
@@ -80,6 +83,7 @@ class DataLayer:
     source: str
     summary: str
     gdf: gpd.GeoDataFrame | None = None
+    table: pd.DataFrame | None = None
     crs: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 

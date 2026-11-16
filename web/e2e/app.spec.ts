@@ -65,4 +65,31 @@ test.describe('MapSmith 前端', () => {
     await page.locator('.mobile-toggle').click()
     await expect(page.locator('.sidebar')).toHaveClass(/open/)
   })
+
+  test('T25 buffer 图种显示缓冲距离并出图', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('.nav button', { hasText: '高级表单' }).click()
+
+    const mapType = page.locator('.field').filter({ hasText: '图种' }).locator('select')
+    await mapType.selectOption('buffer')
+
+    const bufferField = page.locator('.field').filter({ hasText: '缓冲距离' })
+    await expect(bufferField).toBeVisible()
+    await expect(bufferField.locator('input')).toHaveValue('5')
+
+    await page.getByRole('button', { name: '生成地图' }).click()
+    await expect(page.getByAltText('地图预览')).toBeVisible({ timeout: 90_000 })
+  })
+
+  test('T25 overlay 图种显示叠加方式', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('.nav button', { hasText: '高级表单' }).click()
+
+    const mapType = page.locator('.field').filter({ hasText: '图种' }).locator('select')
+    await mapType.selectOption('overlay')
+
+    const opField = page.locator('.field').filter({ hasText: '叠加方式' }).locator('select')
+    await expect(opField).toBeVisible()
+    await expect(opField.locator('option')).toHaveCount(2)
+  })
 })

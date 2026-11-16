@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -44,9 +45,20 @@ def _mapping(value: Any) -> dict[str, Any]:
     raise TypeError(f"spec 必须是 Mapping 或 pydantic 模型，实际为 {type(value)!r}")
 
 
+_PLACEHOLDER_PATTERN = re.compile(r"<[^<>\s]+>|待补全")
+
+
 def apply_spec_patch(spec: Any, patch: Mapping[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(_mapping(spec))
     for path, value in patch.items():
+        if (
+            str(path).split(".")[-1] == "title"
+            and isinstance(value, str)
+            and _PLACEHOLDER_PATTERN.search(value)
+        ):
+            # R01 的补丁是「<区域><指标><时间>图」这类人工修复提示，不是可写回的
+            # 标题；写进 spec 会把图名变成模板占位符（T25 复验）。
+            continue
         parts = [part for part in str(path).split(".") if part]
         if not parts:
             continue

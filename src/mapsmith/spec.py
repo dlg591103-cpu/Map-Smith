@@ -71,8 +71,8 @@ class Layer(BaseModel):
 
     @model_validator(mode="after")
     def _require_field(self):
-        if self.kind in {"idw", "choropleth"} and not self.field:
-            raise ValueError(f"kind={self.kind} 的图层必须提供 field")
+        if self.kind in {"idw", "choropleth", "buffer", "overlay"} and not self.field:
+            raise ValueError(f"kind={self.kind} 的图层必须提供 field（分级设色依据）")
         return self
 
 

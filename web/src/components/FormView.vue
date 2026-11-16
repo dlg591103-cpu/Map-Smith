@@ -17,6 +17,8 @@ const form = reactive<FormState>({
   n: 5,
   palette_scheme: 'YlOrRd',
   palette_reverse: false,
+  buffer_km: '5',
+  overlay_op: 'clip',
 })
 
 const busy = ref(false)
@@ -131,6 +133,18 @@ async function submit(): Promise<void> {
           </select>
         </div>
 
+        <div v-if="form.map_type === 'buffer'" class="field">
+          <label>缓冲距离（km）</label>
+          <input v-model="form.buffer_km" type="number" min="0.1" max="200" step="0.5" />
+        </div>
+        <div v-if="form.map_type === 'overlay'" class="field">
+          <label>叠加方式</label>
+          <select v-model="form.overlay_op">
+            <option value="clip">clip（裁剪）</option>
+            <option value="intersection">intersection（相交）</option>
+          </select>
+        </div>
+
         <div class="field">
           <label>分级方法</label>
           <select v-model="form.method">
@@ -167,7 +181,12 @@ async function submit(): Promise<void> {
         <input v-model="form.palette_reverse" type="checkbox" />
         配色反转
       </label>
-      <p class="hint">buffer / overlay 尚未实现，暂不支持（待 SPEC 决策）。</p>
+      <p v-if="form.map_type === 'buffer'" class="hint">
+        buffer：以点数据生成缓冲区，按缓冲区内站点指标均值分级；缓冲距离默认 5 km。
+      </p>
+      <p v-else-if="form.map_type === 'overlay'" class="hint">
+        overlay：需上传面图层作为主体（在「数据文件」处上传），第二图层使用所选区域的 demo 边界。
+      </p>
 
       <div class="form-actions">
         <button class="btn primary" :disabled="busy" @click="submit">生成地图</button>

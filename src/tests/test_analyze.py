@@ -10,7 +10,14 @@ import pytest
 from shapely.geometry import Point, box
 
 from mapsmith.io.models import DataError, DataLayer
-from mapsmith.tools.analyze import analyze, buffer_layer, clip_layer, join_table, overlay_layer
+from mapsmith.tools.analyze import (
+    analyze,
+    buffer_layer,
+    buffer_metric_stats,
+    clip_layer,
+    join_table,
+    overlay_layer,
+)
 
 
 def _point_layer(coords: list[tuple[float, float]], values: list[float] | None = None) -> DataLayer:
@@ -178,7 +185,56 @@ def test_analyze_overlay_requires_other() -> None:
         analyze(_admin_layer(["A"], [box(0.0, 0.0, 1.0, 1.0)]), "overlay", {})
 
 
+# ---- T25 buffer 指标统计 ----
+
+
+def test_buffer_metric_stats_takes_mean_of_points_inside() -> None:
+    """每个缓冲区取落在其内站点的指标均值；无站点缓冲区为 NaN。"""
+    points = _point_layer(
+        [(117.20, 34.20), (117.21, 34.20), (117.60, 34.60)],
+        [40.0, 50.0, None],
+    )
+    buffers = buffer_layer(points, 5)
+
+    out = buffer_metric_stats(buffers, points, "v")
+
+    assert out.kind == "buffer"
+    assert "buffer_value" in out.gdf.columns
+    values = out.gdf["buffer_value"].tolist()
+    # 前两个点相距约 1 km，落在同一缓冲区内，均值 45；第三个点缺测。
+    assert values[0] == 45.0
+    assert values[1] == 45.0
+    assert len(values) == 3
+    assert out.gdf["buffer_value"].notna().sum() == 2
+
+
+def test_buffer_metric_stats_rejects_missing_field() -> None:
+    points = _point_layer([(117.20, 34.20)], [40.0])
+    buffers = buffer_layer(points, 5)
+
+    with pytest.raises(DataError, match="没有字段"):
+        buffer_metric_stats(buffers, points, "不存在的字段")
+
+
 # ---- T14 join ----
+
+
+def test_join_reads_rows_from_table_field() -> None:
+    """T14 契约缺口：数据行挂在 DataLayer.table 上时 join 必须可用（gdf 为 None）。"""
+    table = DataLayer(
+        kind="table",
+        name="统计表",
+        source="测试",
+        summary="",
+        gdf=None,
+        table=pd.DataFrame([{"adcode": "320301", "PM2_5_24h": 88.0}]),
+    )
+    boundary = _admin_layer(["320301"], [box(116.0, 34.0, 117.0, 34.5)])
+
+    out = join_table(table, boundary, "adcode")
+
+    assert out.meta["matched_count"] == 1
+    assert out.gdf["PM2_5_24h"].iloc[0] == 88.0
 
 
 def test_join_attaches_stats_to_boundary() -> None:

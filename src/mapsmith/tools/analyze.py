@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 import geopandas as gpd
+import numpy as np
 
 from ..io.models import DataError, DataLayer
 from ..projection import choose_measurement_crs
@@ -240,22 +241,84 @@ def _stats_columns(stats: gpd.GeoDataFrame, table_key: str) -> list[str]:
     return [str(col) for col in stats.columns if str(col) != table_key and str(col) != geom_name]
 
 
+def buffer_metric_stats(
+    buffers: DataLayer,
+    points: DataLayer,
+    field: str,
+    *,
+    column: str = "buffer_value",
+) -> DataLayer:
+    """统计每个缓冲区内的站点指标均值（T25，SPEC 第 3.1 节）。
+
+    - 只统计落在缓冲面内的点；字段缺测值不参与均值。
+    - 无站点落入的缓冲区写 NaN，渲染层按缺失处理，调用方在 notes 说明。
+    - 结果面图层 `kind="buffer"`，新增 `column` 列供分级设色。
+    """
+    buffer_gdf = _require_gdf(buffers)
+    point_gdf = _require_gdf(points)
+    if field not in point_gdf.columns:
+        raise DataError(
+            f"{points.name} 没有字段 {field!r}，现有字段：{list(map(str, point_gdf.columns))}"
+        )
+    if buffer_gdf.crs is None or point_gdf.crs is None:
+        raise DataError("缓冲区或站点图层缺少坐标系，无法统计")
+
+    pts = point_gdf
+    if pts.crs != buffer_gdf.crs:
+        pts = pts.to_crs(buffer_gdf.crs)
+    valid = pts.dropna(subset=[field])
+    if valid.empty:
+        raise DataError(f"字段 {field!r} 没有有效值，无法统计缓冲区内均值")
+
+    # 临时序号列避免依赖 sjoin 的索引列名。
+    tmp = buffer_gdf[["geometry"]].copy()
+    tmp["_buffer_id"] = np.arange(len(tmp))
+    joined = gpd.sjoin(valid, tmp, how="inner", predicate="within")
+    grouped = joined.groupby("_buffer_id")[field].mean()
+
+    out = buffer_gdf.copy()
+    # 注意：缓冲区保留了原点的索引（不一定是 0..n），必须按位置赋值，
+    # 直接按索引对齐会把值写成 NaN。
+    out[column] = grouped.reindex(np.arange(len(out))).to_numpy()
+
+    return DataLayer(
+        kind="buffer",
+        name=buffers.name,
+        source=buffers.source,
+        summary=(
+            f"{buffers.name}：{len(out)} 个缓冲面，按 {field} 统计落在其内的站点均值；"
+            f"{int(out[column].notna().sum())} 个缓冲面有站点，"
+            f"{int(out[column].isna().sum())} 个无站点（按缺失处理）。"
+        ),
+        gdf=out,
+        crs=buffers.crs,
+        meta={
+            "op": "buffer_stats",
+            "field": field,
+            "value_field": column,
+            "buffered": dict(buffers.meta),
+            "source_layer": points.name,
+        },
+    )
+
+
 def join_table(table: DataLayer, to: DataLayer, key: Any) -> DataLayer:
     """把统计表按 key 关联到边界，产出带统计值的面图层。
 
-    - 第一参数 `table` 是无几何统计表，数据行必须保存在 `gdf` 里（正确契约前提）。
+    - 第一参数 `table` 是无几何统计表，数据行保存在 `DataLayer.table`（`gdf` 兜底，
+      兼容旧调用）；T14 契约缺口已由 `io/models.py` + `io/uploads.py` 修复。
     - `to` 是带几何的边界图层；结果保留边界几何与统计字段，供分级设色渲染。
     """
-    if table.gdf is None:
+    stats = table.table if table.table is not None else table.gdf
+    if stats is None:
         raise DataError(
             f"{table.name} 没有携带数据行，无法关联；"
-            "契约缺口：table 图层应把统计表数据保存在 gdf 中（待数据管家补上）"
+            "统计表应保存在 DataLayer.table 中（见 docs/自检/T14-契约缺口报告.md）"
         )
 
     boundary = _require_geometry(to, "作为关联边界")
     table_key, boundary_key = _parse_join_key(key)
 
-    stats = table.gdf
     if table_key not in stats.columns:
         raise DataError(
             f"{table.name} 缺少关联键列 {table_key!r}；可用列：{list(map(str, stats.columns))}"

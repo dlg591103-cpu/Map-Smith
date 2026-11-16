@@ -73,6 +73,7 @@ def _csv_to_layer(path: Path, name: str, crs: str | None) -> DataLayer:
             name=name,
             source=f"上传文件 {name}",
             summary=summary,
+            table=df,
             crs=None,
             meta={"encoding": encoding, "columns": columns, "crs_status": "not_applicable"},
         )
