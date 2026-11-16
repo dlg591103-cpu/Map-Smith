@@ -8,7 +8,7 @@
 
 1. 让 facts/02 定义的五类图种在界面与一句话模式**端到端可跑**：`choropleth`、`point`（含气泡）、`idw`、`buffer`、`overlay/clip`。
 2. 补一份 **IDW 通过分支**的真实站点样例（`n ≥ 10` 且凸包覆盖率 `≥ 50%`），并注明来源与日期。
-3. 默认 LLM 走本机 **Ollama**（`qwen2.5:7b`），同时支持 `.env` 接入 DeepSeek / OpenAI 等外部 API。
+3. 默认 LLM 走本机 **Ollama**（`qwen2.5:3b`），同时支持 `.env` 接入 DeepSeek / OpenAI 等外部 API。
 4. 顺带修复 T14 契约缺口：无坐标统计表的数据行不再丢弃，`analyze.join` 可由真实上传链路跑通。
 
 ## 2. 修改范围
@@ -21,7 +21,7 @@
 | `src/mapsmith/render/` | 新增 buffer/overlay 渲染：结果面图层按分级设色（分级依据见第 3 节），复用 T15 版式要素 |
 | `src/mapsmith/io/models.py`、`io/uploads.py` | T14 缺口：`DataLayer` 增加表格数据字段，无坐标 CSV 保存数据行 |
 | `src/mapsmith/tools/analyze.py` | `join_table` 优先从新字段取数，`gdf` 兜底 |
-| `src/mapsmith/config.py` | LLM 默认值：`llm_base_url=http://127.0.0.1:11434/v1`、`llm_model=qwen2.5:7b`、`llm_api_key="ollama"`（占位，Ollama 不校验） |
+| `src/mapsmith/config.py` | LLM 默认值：`llm_base_url=http://127.0.0.1:11434/v1`、`llm_model=qwen2.5:3b`、`llm_api_key="ollama"`（占位，Ollama 不校验） |
 | `src/mapsmith/agents/llm.py` | 回落顺序：环境变量/`.env` → 预置默认（Ollama）→ 中文「未配置」提示；探测 `127.0.0.1:11434` 是否可用 |
 | `web/src/` | 表单新增：图种选项 `buffer` / `overlay`，缓冲距离输入，第二图层上传/选择；文案去掉「buffer / overlay 尚未实现」 |
 | `src/mapsmith/demo_data/` | 新增 IDW 通过样例（区域与字段依实测阈值确定），`README` 注明来源、日期、站数、覆盖率 |
