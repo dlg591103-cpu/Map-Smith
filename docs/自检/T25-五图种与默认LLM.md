@@ -42,7 +42,7 @@ SPEC 第 5 节共 9 条，逐条结果如下。
 | 4 | buffer 分级值为缓冲区内站点指标均值，图例注明半径与参与站点数 | 通过 | 10 个缓冲面、9 个含站点；逐面 `within` 复算均值，**0 处不匹配**；图例标题三行：`分位数分级，4 级 / 缓冲距离 5 km / 9/10 面含站点` |
 | 5 | overlay/clip 结果可渲染，图层数正确，沿用主体字段分级 | 通过 | 修复第二图层后：境内主体 `rendered`，注记写「第二图层：徐州市行政边界」；境外主体报「裁剪后为空：与 徐州市行政边界 无交集」；clip 10→10，intersection 10→34 且 `buffer_value` 保留 |
 | 6 | IDW 样例满足 `n ≥ 10`、`cover ≥ 50%`，断网可演示 | 通过 | 广州 20 个有效站（共 21 个），覆盖度 **53%**；仅凸包内着色；全程 `online=False` |
-| 7 | 无 key 时默认 Ollama 可用；Ollama 未启动提示明确；`.env` 填 key 可切换外部 API | **部分通过** | 默认 Ollama 已实测：一句话五图种脚本在本机 `qwen2.5:3b` 上全部出图；Ollama 未启动提示与 `.env` 外部 API 切换尚未实测 |
+| 7 | 无 key 时默认 Ollama 可用；Ollama 未启动提示明确；`.env` 填 key 可切换外部 API | **部分通过** | 默认 Ollama 可用：一句话五图种 5/5；未启动提示已实测：临时把 `MAPSMITH_LLM_BASE_URL` 指向未监听的 `127.0.0.1:11435/ollama/v1`，五条均返回「本地模型未启动」文案；`.env` 外部 API 切换尚未实测 |
 | 8 | T14 缺口：上传统计表 → join → choropleth 端到端跑通 | 通过 | 无坐标 CSV 10 行 → `DataLayer.table` 保留 → `join_table` 10 面全部匹配 → choropleth PNG 314,836 B |
 | 9 | 全量 pytest 通过（新增用例覆盖上述分支） | 通过 | `321 passed, 4 warnings in 29.90s` |
 
@@ -56,7 +56,7 @@ SPEC 第 5 节共 9 条，逐条结果如下。
 
 ## 4. 已知项与未做
 
-1. 一句话五图种已在本机 `qwen2.5:3b` 上 5/5 通过；Ollama 未启动提示与 `.env` 外部 API 切换仍未实测。
+1. 一句话五图种已在本机 `qwen2.5:3b` 上 5/5 通过；Ollama 未启动提示已在未监听端口场景实测；`.env` 外部 API 切换仍未实测。
 2. 极端密集点（超过 8 个点重合）时标签只能靠描边保证可读，未做大规模压力场景。
 3. 仓库根目录存在未跟踪的 `mapsmith-v0.1.0.zip`，未纳入本次交付。
 4. 默认模型口径已统一为 `qwen2.5:3b`，见 `d349274`；此前 SPEC 中 `7b` 的两处已同步。
@@ -131,4 +131,6 @@ $env:PYTHONPATH = "E:\Map Smith\src"
 & "E:\Map Smith\.venv\Scripts\python.exe" "E:\Map Smith\out\t25_sentence_five_check.py"
 ```
 
-仍待实测：Ollama 未启动提示、`.env` 外部 API 切换。
+未启动提示实测（临时指向未监听的 11435）：5 条均为 `error`，文案含「本地模型未启动：请确认 Ollama 正在运行……」。
+
+仍待实测：`.env` 外部 API 切换。
