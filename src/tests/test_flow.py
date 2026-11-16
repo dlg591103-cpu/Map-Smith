@@ -370,6 +370,28 @@ def test_form_spec_builds_buffer_spec():
     assert any("缓冲距离" in note for note in spec.notes)
 
 
+def test_compose_spec_uses_buffer_when_draft_asks():
+    """T25：一句话模式下制图师可指定 buffer，系统做确定性分析并写回字段。"""
+    loaded = make_loaded()
+    spec = flow._compose_spec(
+        request(),
+        loaded,
+        {
+            "map_type": "buffer",
+            "buffer_km": 5,
+            "title": "徐州市PM2.5 2026-11-01图",
+            "classification": {"method": "quantile", "n": 5},
+            "palette": {"scheme": "YlOrRd"},
+        },
+    )
+
+    assert spec.map_type == "buffer"
+    assert spec.layers[0].kind == "buffer"
+    assert spec.layers[0].field == "buffer_value"
+    assert loaded["analysis_layer"].kind == "buffer"
+    assert any("缓冲距离" in note for note in spec.notes)
+
+
 def test_form_spec_rejects_overlay_without_face_layer():
     loaded = make_loaded()
     with pytest.raises(DataError, match="上传面图层"):

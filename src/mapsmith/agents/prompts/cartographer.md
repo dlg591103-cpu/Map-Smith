@@ -33,6 +33,9 @@
 ## 必须遵守
 
 1. **图种由 `decision` 决定**：`idw` → `map_type=idw`；`degrade` → `point`（站数多、需要表达量级时用气泡）；`reject` → 不输出 spec。
+   **例外（T25）**：用户明确要求「缓冲区 / 缓冲分析」时输出 `map_type=buffer` 并给 `"buffer_km": <公里数>`；
+   用户明确要求「叠加 / 裁剪」时输出 `map_type=overlay` 并给 `"overlay_op": "clip"` 或 `"intersection"`。
+   这两种图种的 `field` 由系统决定（buffer 为缓冲区内站点均值），你只需选择分级方法与配色。
 2. **`title` 必须同时含区域、指标、日期**，缺一即审查不过。
 3. **`data_source_note` 必须带日期**，格式 `YYYY-MM-DD`。
 4. **`notes` 原样写入 `reason_lines` 三行**，不改写、不删减。

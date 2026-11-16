@@ -493,8 +493,11 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
     date = request["time"]
     field_name = request["metric"]
     decision = str(loaded["decision"])
+    draft_type = _clean(draft.get("map_type"))
 
-    if decision == "idw":
+    if draft_type in {"buffer", "overlay"}:
+        map_type = draft_type
+    elif decision == "idw":
         map_type = "idw"
     elif decision == "choropleth":
         map_type = "choropleth"
@@ -506,6 +509,23 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
     if gdf is None:
         raise DataError("图层没有几何，无法制图")
 
+    analysis = None
+    spec_field = field_name
+    extra_notes: list[str] = []
+    if map_type in {"buffer", "overlay"}:
+        analysis, spec_field, extra_notes = _analysis_layer_for(
+            map_type,
+            layer=layer,
+            admin=loaded.get("admin"),
+            points=loaded.get("points"),
+            field_name=field_name,
+            buffer_km=draft.get("buffer_km"),
+            overlay_op=draft.get("overlay_op"),
+        )
+        if isinstance(loaded, dict) and analysis is not None:
+            loaded["analysis_layer"] = analysis
+    target = analysis.gdf if analysis is not None else gdf
+
     classification = draft.get("classification") if isinstance(draft.get("classification"), Mapping) else {}
     method = _clean(classification.get("method")) or "quantile"
     if method not in SUPPORTED_METHODS:
@@ -514,16 +534,18 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
     scheme, reverse, palette_note = _palette_from(draft.get("palette"))
     unit = METRIC_UNITS.get(field_name)
 
-    if field_name == "AQI":
+    if field_name == "AQI" and map_type in {"point", "idw", "choropleth"}:
         method, n, breaks = "custom", 6, list(AQI_BREAKS)
         scheme, reverse, palette_note = AQI_SCHEME, False, None
         unit = AQI_UNIT
+    elif map_type in {"buffer", "overlay"}:
+        n, breaks = _adaptive_breaks(target, spec_field, method, n, extra_notes)
     else:
-        breaks = _breaks_for(gdf, field_name, method, n)
-    label_field, show_label = _annotation_from(draft.get("annotation"), gdf.columns)
+        breaks = _breaks_for(target, spec_field, method, n)
+    label_field, show_label = _annotation_from(draft.get("annotation"), target.columns)
     notes = _merge_notes(
         loaded.get("reason_lines"),
-        list(draft.get("notes") or []) + ([palette_note] if palette_note else []),
+        list(draft.get("notes") or []) + ([palette_note] if palette_note else []) + extra_notes,
     )
 
     return build_spec(
@@ -532,7 +554,7 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
             "map_type": map_type,
             "adcode": loaded.get("admin", layer).meta.get("adcode"),
             "bbox": _bbox_for(loaded, map_type),
-            "field": field_name,
+            "field": spec_field,
             "method": method,
             "n": n,
             "breaks": breaks,
@@ -546,6 +568,75 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
             "notes": notes,
         }
     )
+
+
+def _adaptive_breaks(
+    target: Any,
+    field: str,
+    method: str,
+    n: int,
+    extra: list[str],
+) -> tuple[int, list[float | None]]:
+    """buffer / overlay 结果面数有限：级数超过有效面时逐级下调并记录原因。"""
+    for attempt in range(n, 1, -1):
+        try:
+            breaks = _breaks_for(target, field, method, attempt)
+        except DataError:
+            continue
+        if attempt != n:
+            extra.append(f"分级数由 {n} 自动降为 {attempt}：有效面数不足以分 {n} 级")
+        return attempt, breaks
+    raise DataError(f"{field} 的有效面不足 2 个，无法分级；请扩大分析范围或改用其他图种")
+
+
+def _analysis_layer_for(
+    map_type: str,
+    *,
+    layer: DataLayer,
+    admin: DataLayer | None,
+    points: DataLayer | None,
+    field_name: str,
+    buffer_km: Any = None,
+    overlay_op: Any = None,
+) -> tuple[DataLayer | None, str, list[str]]:
+    """buffer / overlay 的确定性分析与字段选择（表单与一句话共用，T25）。
+
+    返回 `(分析结果面图层, spec 使用的字段, 备注)`；非这两种图种返回 `(None, field, [])`。
+    """
+    extra: list[str] = []
+    if map_type == "buffer":
+        if points is None or points.gdf is None:
+            raise DataError("buffer 需要点数据：请上传点位数据或使用 demo_data 站点")
+        distance = _buffer_km(buffer_km)
+        analysis = buffer_metric_stats(buffer_layer(points, distance), points, field_name)
+        covered = int(analysis.gdf["buffer_value"].notna().sum())
+        extra.append(
+            f"缓冲距离 {distance:g} km；{covered}/{len(analysis.gdf)} 个缓冲面含站点，"
+            "无站点缓冲面按缺失处理"
+        )
+        return analysis, "buffer_value", extra
+
+    if map_type == "overlay":
+        if layer.kind != "admin" or layer.gdf is None:
+            raise DataError("overlay 需要上传面图层作为主体；第二图层使用 demo_data 边界")
+        if admin is None or admin.gdf is None:
+            raise DataError("overlay 需要第二图层：请选择区域以加载 demo_data 边界")
+        op = _clean(overlay_op) or "clip"
+        if op == "clip":
+            analysis = clip_layer(layer, admin)
+        elif op in {"intersection", "overlay"}:
+            analysis = overlay_layer(layer, admin, how="intersection")
+        else:
+            raise DataError(f"叠加方式 {op!r} 不受支持；可用 clip / intersection")
+        spec_field = (
+            field_name
+            if field_name in analysis.gdf.columns
+            else next(iter(_numeric_columns(analysis)), field_name)
+        )
+        extra.append(f"叠加方式：{analysis.meta.get('op', op)}；第二图层：{admin.name}")
+        return analysis, spec_field, extra
+
+    return None, field_name, extra
 
 
 def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str, Any]) -> MapSpec:
@@ -574,38 +665,16 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
     if map_type == "choropleth":
         if loaded.get("admin") is None or loaded["admin"].gdf is None:
             raise DataError("choropleth 需要面数据：请上传面图层或使用 demo_data 边界")
-    elif map_type == "buffer":
-        points = loaded.get("points")
-        if points is None or points.gdf is None:
-            raise DataError("buffer 需要点数据：请上传点位数据或使用 demo_data 站点")
-        distance = _buffer_km(form.get("buffer_km"))
-        buffers = buffer_layer(points, distance)
-        analysis = buffer_metric_stats(buffers, points, field_name)
-        spec_field = "buffer_value"
-        covered = int(analysis.gdf["buffer_value"].notna().sum())
-        extra_notes.append(
-            f"缓冲距离 {distance:g} km；{covered}/{len(analysis.gdf)} 个缓冲面含站点，"
-            "无站点缓冲面按缺失处理"
+    elif map_type in {"buffer", "overlay"}:
+        analysis, spec_field, extra_notes = _analysis_layer_for(
+            map_type,
+            layer=layer,
+            admin=loaded.get("admin"),
+            points=loaded.get("points"),
+            field_name=field_name,
+            buffer_km=form.get("buffer_km"),
+            overlay_op=form.get("overlay_op"),
         )
-    elif map_type == "overlay":
-        if layer.kind != "admin" or layer.gdf is None:
-            raise DataError("overlay 需要上传面图层作为主体；第二图层使用 demo_data 边界")
-        boundary = loaded.get("admin")
-        if boundary is None or boundary.gdf is None:
-            raise DataError("overlay 需要第二图层：请选择区域以加载 demo_data 边界")
-        op = _clean(form.get("overlay_op")) or "clip"
-        if op == "clip":
-            analysis = clip_layer(layer, boundary)
-        elif op in {"intersection", "overlay"}:
-            analysis = overlay_layer(layer, boundary, how="intersection")
-        else:
-            raise DataError(f"叠加方式 {op!r} 不受支持；可用 clip / intersection")
-        spec_field = (
-            field_name
-            if field_name in analysis.gdf.columns
-            else next(iter(_numeric_columns(analysis)), field_name)
-        )
-        extra_notes.append(f"叠加方式：{analysis.meta.get('op', op)}；第二图层：{boundary.name}")
     else:
         if loaded.get("points") is None:
             raise DataError(f"{map_type} 需要点数据：请上传点位数据或使用 demo_data 站点")
@@ -627,21 +696,7 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
         method, n, breaks = "custom", 6, list(AQI_BREAKS)
         scheme, unit = AQI_SCHEME, AQI_UNIT
     elif map_type in {"buffer", "overlay"}:
-        # 缓冲/叠加后的面数有限，级数超过有效面时无法分级：逐级下调并在 notes 说明。
-        breaks = None
-        for attempt in range(n, 1, -1):
-            try:
-                breaks = _breaks_for(target, spec_field, method, attempt)
-            except DataError:
-                continue
-            if attempt != n:
-                extra_notes.append(f"分级数由 {n} 自动降为 {attempt}：有效面数不足以分 {n} 级")
-            n = attempt
-            break
-        if breaks is None:
-            raise DataError(
-                f"{spec_field} 的有效面不足 2 个，无法分级；请扩大分析范围或改用其他图种"
-            )
+        n, breaks = _adaptive_breaks(target, spec_field, method, n, extra_notes)
     else:
         breaks = _breaks_for(target, spec_field, method, n)
 
