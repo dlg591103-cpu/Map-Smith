@@ -25,7 +25,9 @@ step() { echo "[run.sh] $*"; }
 
 is_python312() {
     # 检查什么：解释器存在且版本为 3.12+（SPEC 第 5 节要求 Python 3.12）。
-    "$1" --version 2>/dev/null | grep -Eq '^Python 3\.([2-9][0-9]|[1-9][0-9]{2})\.' || return 1
+    # 正则须覆盖 3.12–3.19、3.20–3.99、3.100+；
+    # 早先的 [2-9][0-9] 会把 3.10–3.19 排除，连 3.12 都判为不满足。
+    "$1" --version 2>/dev/null | grep -Eq '^Python 3\.(1[2-9]|[2-9][0-9]|[1-9][0-9]{2})\.' || return 1
 }
 
 find_interpreter() {
