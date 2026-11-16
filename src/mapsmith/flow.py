@@ -233,7 +233,7 @@ def parse_request(text: str, llm_callable: Callable[[str, Mapping[str, Any]], An
             "place": "区域名称，缺项填空字符串",
             "time": "YYYY-MM-DD，缺项填空字符串",
             "metric": "PM2.5 / PM10 / NO2 / SO2 / O3 / CO / AQI，缺项填空字符串",
-            "questions": ["最多两条向用户的反问"],
+            "questions": ["仅当字段缺失时填写，最多两条；三项齐全时必须为 []"],
         },
         "format_instruction": "只返回一个 JSON 对象，不要 Markdown 表格、代码围栏或解释文字。",
     }
