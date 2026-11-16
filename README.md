@@ -37,7 +37,7 @@
 -   多人协作：仓库已公开，`PINGNINGYI` 已作为协作者加入并具备 Write 权限。`main` 已启用 Rulesets 保护（要求 PR、1 个批准、Code Owner 评审、禁止强推与删除）；bypass list 仅含仓库拥有者 `dlg591103-cpu`（`For pull requests only`），拥有者可自行合并自己的 PR，其余账号仍需批准。实测：PR #4 经 bypass 以 Squash 合并，`main` 为 `40a680b`。经典保护下已实测：协作者可推送分支并发起 PR、直推 `main` 被拒绝（protected branch / GH006）、未获批准时合并被阻止。PR 模板自动填充尚待下一次建 PR 时确认。
 -   审图员（SPEC T19 / 需求单 T12 Reviewer）：`tools/qa_check.py` 十条硬规则、`agents/reviewer.py` 返工契约、`kb/reviewer_rules.json` 与审图 prompt 已完成，自检见 [`docs/自检/T19-reviewer-自检记录.md`](docs/自检/T19-reviewer-自检记录.md)。
 -   T22 第二段（2026-11-10）：界面从 Streamlit 换为 Vue 3 + Vite（`web/`，`dist/` 入库）+ FastAPI（`src/mapsmith/server.py`），一句话与表单都经 `loop.run`；SPEC 见 [`docs/Spec/T22-一句话入口与loop接入.md`](docs/Spec/T22-一句话入口与loop接入.md)，自检见 [`docs/自检/T22-界面-第二段.md`](docs/自检/T22-界面-第二段.md)。
--   T23 打包（2026-11-16）：`run.ps1`（Windows 一键启动）、`run.sh`（Linux / macOS）、`Dockerfile`、`docker-compose.yml`、`.dockerignore`；独立验收通过，记录见 [`docs/验收/T23.md`](docs/验收/T23.md)。GitHub Release **v0.1.0** 已发布，附 `mapsmith-v0.1.0.zip`：<https://github.com/dlg591103-cpu/Map-Smith/releases/tag/v0.1.0>。
+-   T23 打包（2026-11-16）：`run.ps1`（Windows 一键启动）、`run.sh`（Linux / macOS）、`Dockerfile`、`docker-compose.yml`、`.dockerignore`；独立验收通过，记录见 [`docs/验收/T23.md`](docs/验收/T23.md)。GitHub Release **v0.1.0** 已发布，附 `mapsmith-v0.1.0.zip`：<https://github.com/dlg591103-cpu/Map-Smith/releases/tag/v0.1.0>。**v0.1.1 发布准备完成**：版本号与发布包已验证，合并、tag 与 Release 待在本机终端执行，见 [`docs/验收/v0.1.1.md`](docs/验收/v0.1.1.md)。
 
 ## 版本管理约定
 
