@@ -418,7 +418,9 @@ def _ensure_title(draft_title: Any, place: str, field_name: str, date: str) -> s
     local = _local_title(place, field_name, date)
     if not title:
         return local
-    required = [place, date, METRIC_LABELS.get(field_name, field_name)]
+    # 区域按 R01 口径要求带行政区后缀（如「徐州市」）；模型只写「徐州」时
+    # 审查会判 R01 fail，因此这里与审查规则保持一致，直接回退本地标题。
+    required = [_region_label(place), date, METRIC_LABELS.get(field_name, field_name)]
     if not all(part and part in title for part in required):
         return local
     unit = METRIC_UNITS.get(field_name)
@@ -437,10 +439,38 @@ def _merge_notes(base: Any, extra: Any) -> list[str]:
     return merged
 
 
+_CONCLUSION_PREFIX = "结论："
+
+
+def _reason_notes(loaded: Mapping[str, Any], map_type: str) -> list[str]:
+    """数据体检的「结论」行只在它真正决定图种时写入注记。
+
+    ``reason_lines`` 的结论行描述渲染方式（如「降级为点图」）。用户显式选择
+    choropleth / buffer / overlay 时，渲染按用户图种执行，继续写入会与实际
+    出图矛盾；站数与覆盖度等体检数据仍保留。T25 复验修复。
+    """
+    decision = _clean(loaded.get("decision"))
+    conclusion_applies = (map_type == "point" and decision == "degrade") or (
+        map_type == "idw" and decision == "idw"
+    )
+    lines: list[str] = []
+    for item in loaded.get("reason_lines") or []:
+        text = _clean(item)
+        if not text:
+            continue
+        if text.startswith(_CONCLUSION_PREFIX) and not conclusion_applies:
+            continue
+        lines.append(text)
+    return lines
+
+
 def _bbox_for(loaded: Mapping[str, Any], map_type: str) -> tuple[float, float, float, float] | None:
     layer = loaded["layer"]
-    if map_type == "choropleth":
-        admin = loaded.get("admin")
+    if map_type in {"choropleth", "overlay"}:
+        # overlay 的主体是上传面、第二图层是区域边界；图幅取区域边界才能同时
+        # 看到叠加结果与区域上下文。只用主体 bbox 会把局部主体放大到满幅，
+        # 第二图层落到图外，指北针也会压到面色块上（T25 复验）。
+        admin = loaded.get("overlay_base") if map_type == "overlay" else loaded.get("admin")
         if admin is not None:
             bbox = admin.bbox_wgs84()
             if bbox is not None:
@@ -596,7 +626,7 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
         breaks = _breaks_for(target, spec_field, method, n)
     label_field, show_label = _annotation_from(draft.get("annotation"), target.columns)
     notes = _merge_notes(
-        loaded.get("reason_lines"),
+        _reason_notes(loaded, map_type),
         list(draft.get("notes") or []) + ([palette_note] if palette_note else []) + extra_notes,
     )
 
@@ -752,7 +782,7 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
     else:
         breaks = _breaks_for(target, spec_field, method, n)
 
-    notes = _merge_notes(loaded.get("reason_lines"), extra_notes)
+    notes = _merge_notes(_reason_notes(loaded, map_type), extra_notes)
     label_field = _clean(form.get("label_field")) or None
     if label_field is not None and label_field not in target.columns:
         label_field = None

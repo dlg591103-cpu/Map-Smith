@@ -120,6 +120,19 @@ def test_fix_spec_patch_can_be_applied():
     assert qa_check(patched)["passed"] is True
 
 
+def test_placeholder_title_patch_is_not_written():
+    """R01 的修复补丁是占位符模板，不得覆盖已有标题。"""
+    spec = compliant_spec()
+    spec["title"] = "徐州 PM2.5 图"
+    result = qa_check(spec)
+    patch = next(item["fix_spec_patch"] for item in result["issues"] if item["rule"] == "R01")
+    assert patch
+
+    patched = apply_spec_patch(spec, patch)
+
+    assert patched["title"] == "徐州 PM2.5 图"
+
+
 def test_review_output_contract_fields():
     result = review(compliant_spec(), round_no=1)
     assert set(result) >= {"passed", "round", "issues", "summary"}

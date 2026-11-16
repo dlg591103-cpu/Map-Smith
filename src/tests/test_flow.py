@@ -637,3 +637,106 @@ def test_llm_map_fn_overrides_map_type_by_user_text() -> None:
 
     assert spec.map_type == "buffer"
     assert loaded["analysis_layer"].kind == "buffer"
+
+
+# --- T25 复验：图幅范围与体检结论注记 ---------------------------------------
+
+
+def make_surface() -> DataLayer:
+    """上传面作为 overlay 主体：只覆盖局部小面。"""
+    return DataLayer(
+        kind="admin",
+        name="上传面",
+        source="upload",
+        summary="2 个面",
+        gdf=gpd.GeoDataFrame(
+            {"name": ["面A", "面B"], "PM2_5_24h": [50.0, 60.0]},
+            geometry=[box(117.12, 34.15, 117.2, 34.22), box(117.25, 34.25, 117.33, 34.32)],
+            crs="EPSG:4326",
+        ),
+        crs="EPSG:4326",
+        meta={"adcode": "320300"},
+    )
+
+
+def test_form_spec_buffer_notes_drop_point_degrade_conclusion():
+    """buffer 按用户图种渲染，注记不应写「降级为点图」。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "buffer", "buffer_km": "5", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    assert not any("降级为点图" in note for note in spec.notes)
+    assert any("站数" in note for note in spec.notes)
+    assert any("缓冲距离" in note for note in spec.notes)
+
+
+def test_form_spec_choropleth_notes_drop_point_degrade_conclusion():
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "choropleth", "method": "quantile", "n": 3},
+        loaded,
+    )
+
+    assert spec.map_type == "choropleth"
+    assert not any("降级为点图" in note for note in spec.notes)
+
+
+def test_form_spec_point_keeps_degrade_conclusion():
+    """点图确实由 degrade 决定，结论行保留。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "point", "method": "quantile", "n": 3},
+        loaded,
+    )
+
+    assert any("降级为点图" in note for note in spec.notes)
+
+
+def test_compose_spec_buffer_drops_point_degrade_conclusion():
+    """一句话点名缓冲时，结论行同样不应写「降级为点图」。"""
+    loaded = make_loaded()
+    spec = flow._compose_spec(
+        request(),
+        loaded,
+        {
+            "map_type": "buffer",
+            "buffer_km": 5,
+            "classification": {"method": "quantile", "n": 2},
+            "palette": {"scheme": "YlOrRd"},
+        },
+    )
+
+    assert not any("降级为点图" in note for note in spec.notes)
+
+
+def test_overlay_spec_uses_region_extent_not_upload_extent():
+    """overlay 图幅取第二图层范围，不随局部上传主体缩到满幅。"""
+    loaded = make_loaded()
+    surface = make_surface()
+    loaded["layer"] = surface
+    loaded["admin"] = surface
+    loaded["overlay_base"] = make_admin()
+
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "overlay", "overlay_op": "clip", "method": "quantile", "n": 2},
+        loaded,
+    )
+
+    assert spec.extent.bbox == loaded["overlay_base"].bbox_wgs84()
+    assert not any("降级为点图" in note for note in spec.notes)
+
+
+def test_ensure_title_requires_region_suffix_for_r01():
+    """R01 要求区域带行政区后缀；模型只写「徐州」时回退本地标题。"""
+    assert (
+        flow._ensure_title("徐州 PM2.5 分布图（2026-11-01）", "徐州", "PM2_5_24h", "2026-11-01")
+        == "徐州市 PM2.5 分布图（2026-11-01，μg/m³）"
+    )
+    kept = "徐州市 PM2.5 分布图（2026-11-01，μg/m³）"
+    assert flow._ensure_title(kept, "徐州", "PM2_5_24h", "2026-11-01") == kept
