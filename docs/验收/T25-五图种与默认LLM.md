@@ -162,3 +162,113 @@ SPEC 第 5 节第 7 条包含「`.env` 填 key 可切换到外部 API」，自�
 - 出图证据：`out/verify/accept/web/` 下六个请求目录的 PNG。
 - 失败证据：`out/verify/tb.txt`（沙箱下 `test_server.py` 失败堆栈，含 `Sandbox Network Error`）。
 - 本次未产生仓库代码改动；验收记录为本文件。
+
+## 10. 第 2 轮复验（2026-11-16，独立验收会话）
+
+> 第 1–9 节为首轮验收记录，保留为历史事实，本轮不作修改。本节只记录复验对象 `ea3e128` 的实测结果。
+
+| 项目 | 内容 |
+| --- | --- |
+| 验收对象 | `feat/t25-five-map-types` @ `ea3e128`（`ea3e128fa6bdae6ce82e9f4e2070e5591d3afd49`，验收时分支最新提交；本记录提交在其后，不改变验收对象） |
+| 复验范围 | 首轮两处用户可见缺陷的修复，以及 [T25 SPEC](../Spec/T25-五图种与默认LLM.md) 第 5 节全部 9 条 |
+| 修复提交 | `e705cdd`（`flow._bbox_for()`、`flow._reason_notes()`、标题占位符与回归用例）；`ea3e128` 仅补自检与验收文档 |
+| 基线 | `main` @ `812fdbb`；`git rev-list --count HEAD..origin/main` = 0 |
+| 环境 | Windows 11 + PowerShell 5.1；Python 3.12（`E:\Map Smith\.venv`）；本会话沙箱禁止全部 loopback 连接 |
+| 执行者 | CodeArts（另一独立验收会话）；第 1、7、9 条的用户本机复跑由用户执行。验收会话未修改源码，仅新增本记录；开发与复验不同会话，符合工程规则第 5 条 |
+| 日期 | 2026-11-16 |
+
+### 10.1 提交与范围核对
+
+| 检查 | 结果 |
+| --- | --- |
+| 验收对象提交（验收时 HEAD） | `ea3e128fa6bdae6ce82e9f4e2070e5591d3afd49` |
+| 分支相对 `origin/main` | 0 |
+| 工作区 | 仅未跟踪 `mapsmith-v0.1.0.zip`（与首轮一致，不纳入交付） |
+| 基线至交付 | `812fdbb..ea3e128`，41 个文件，`+1671 / -91` |
+| 改动范围 | 与 SPEC 第 2 节一致；未发现 `docs/facts/` 改动，未发现 SSE/上传契约改动 |
+| 源码修复范围 | `e705cdd` 仅 4 个文件：`flow.py`、`reviewer.py`、`test_flow.py`、`test_reviewer.py` |
+
+### 10.2 复验方法
+
+1. `git rev-parse HEAD` 固定为 `ea3e128`，复验期间不更换提交、不修改源码。
+2. 表单五图种实跑：point、choropleth、idw、buffer、overlay（clip 用 2 面主体，intersection 用 10 面主体）；逐张读取 PNG 核对版式与注记。
+3. buffer 半径、缓冲区内均值、IDW 覆盖度全部独立复算，不引用自检数值。
+4. T14 按「无坐标 CSV → `DataLayer.table` → `join_table` → choropleth PNG」重新执行。
+5. Ollama 未启动提示按「指向未监听端口」实测；`.env` 外部 API 读取配置并尝试连通；一句话模式在本会话尝试调用（被沙箱拦截），随后由用户在本机终端复跑（见 10.6）。
+6. 全量 pytest 与 `test_server.py` 分别执行并保存原始输出。
+7. 复验脚本：`out/verify2/t25_recheck_ea3e128.py`（临时文件，不入库），输出 `out/verify2/recheck.json`。
+
+### 10.3 首轮问题修复核对
+
+| 首轮问题 | 复验结果 |
+| --- | --- |
+| 6.2 overlay 图幅只覆盖主体，第二图层在图外、指北针压面 | **已修复**。overlay 的 `extent.bbox` 取徐州全域 `[116.3571, 33.7123, 118.6687, 34.9758]`；PNG 比例尺由 2 km 变为 **50 km**，指北针位于右上空白区，未压面。clip 2→2、intersection 10→14 均 `rendered`。残留建议：第二图层边界本身仍未绘制，图面只见结果面；SPEC 第 3 节第 2 条未要求绘制第二图层，不判阻塞 |
+| 6.3 buffer / choropleth 图底注记写「降级为点图」，与实际面状渲染矛盾 | **已修复（图面注记）**。`spec.notes` 与 PNG 图底注记均不再出现「降级为点图 / 不做插值」，站数与覆盖度保留；point + degrade、idw + idw 的结论行仍正确保留。注意：SSE 的 `result.notes` 仍含体检摘要原句，属数据体检结论而非图面注记，本轮未计为缺陷 |
+| 一句话 choropleth 标题被写成 `<区域><指标><时间>图` | **已修复**。表单标题正常；用户本机一句话五图种审查均为「R01–R10 无 fail」，标题含区域（徐州市）、指标、日期与单位 |
+| 6.4 自检 pytest 数字不一致、6.5 交付提交未固定 | 自检已写 `328 passed` 与 `e095ff9` / `e705cdd`；`316 + 12 = 328` 与实测总数一致，文档已同步 |
+
+### 10.4 逐项结果（SPEC 第 5 节）
+
+| # | 验收条件 | 判定 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 五种图种在表单与一句话模式各跑通一次，`MapSpec` 校验通过 | 通过 | 表单 5/5 `rendered`，`MapSpec(**spec)` 均通过（overlay 分别跑 clip 与 intersection）；用户本机一句话 5/5 `rendered`（默认 Ollama 与外部 API 各一轮），审查 R01–R10 无 fail |
+| 2 | 五图种出图中文标题/图例/注记无乱码，版式要素齐全 | 通过 | 表单五张 PNG 逐张核对：标题、图例、比例尺、指北针、底部注记齐全，`μg/m³`、`≤`、`≥` 正常；用户本机一句话五图种 5/5，审查 R01–R10 无 fail |
+| 3 | buffer 距离与投影坐标一致 | 通过 | `EPSG:4548`，10 个缓冲面等效半径均 `4.996 km`，相对 5 km 偏差 `0.08%` |
+| 4 | buffer 分级值为缓冲区内站点均值，图例注明半径与参与站点数 | 通过 | 10 面、9 面含站点；逐面 `within` 复算 `mismatches=[]`；图例写「缓冲距离 5 km」「9/10 面含站点」；渲染「9 个面已分级设色，缺失 1 个」 |
+| 5 | overlay/clip 结果可渲染，图层数正确，沿用主体字段分级 | 通过 | clip 2→2、intersection 10→14，均 `rendered`，字段 `PM2_5_24h`；注记写操作类型与「第二图层：徐州市行政边界」；主体越界时首轮已实测报「裁剪后为空」，本轮未重复 |
+| 6 | IDW 样例满足 `n ≥ 10`、`cover ≥ 50%`，断网可演示 | 通过 | 独立复算：有效站 20/21，凸包 4255.2 km²，研究区 7400.0 km²，覆盖度 **53.4%**；全程 `online=False` |
+| 7 | 无 key 时默认 Ollama 可用；Ollama 未启动提示明确；`.env` 填 key 可切换外部 API | 通过 | 未启动提示文案正确；用户本机默认 Ollama 一句话 5/5 `rendered`；`.env` 外部 API `connectivity.ok=true`、`provider=external`、`model=cn:deepseek-v4.1-flash`，一句话五图种 5/5 `rendered` |
+| 8 | T14：上传统计表 → join → choropleth 端到端跑通 | 通过 | 无坐标 CSV 10 行 → `DataLayer.table` 保留 → `join_table` 10/10 匹配（45–60）→ PNG `314,836 B` |
+| 9 | 全量 pytest 通过 | 通过 | 用户本机 `328 passed, 4 warnings in 27.09s`；验收沙箱为 `316 passed, 12 failed`，12 项均为 `test_server.py` 的 loopback 拦截，非代码失败；其余 196 项相关用例在沙箱通过 |
+
+### 10.5 关键实测数据
+
+```text
+buffer   measurement_crs=EPSG:4548, radius 4.996 km, deviation 0.08%,
+         buffers=10, with_sites=9, mismatches=[]
+IDW      n=20/21, hull=4255.2 km², study=7400.0 km², cover=53.4%
+T14      table_rows=10 → features=10, matched=10, values 45–60, PNG 314,836 B
+overlay  clip 2→2 rendered; intersection 10→14 rendered
+         extent=[116.3571, 33.7123, 118.6687, 34.9758], scale=50 km
+LLM      provider=external, model=cn:deepseek-v4.1-flash, reachable=false（验收沙箱）
+         not_running=「本地模型未启动：请确认 Ollama 正在运行……」
+pytest   all: 316 passed, 12 failed; server: 12 failed (sandbox loopback)
+         non-server: 196 passed
+```
+
+本机复跑（用户终端，2026-11-16）：
+
+```text
+ollama   一句话 5/5 rendered（point / choropleth / idw / buffer / overlay）
+external connectivity.ok=true; provider=external; 一句话 5/5 rendered
+pytest   328 passed, 4 warnings in 27.09s
+logs     out/verify2/local_sentence_ollama.txt
+         out/verify2/local_external_api.txt
+         out/verify2/local_sentence_external.txt
+         out/verify2/local_pytest.txt
+```
+
+### 10.6 沙箱限制与本机补齐
+
+本会话沙箱仍禁止 loopback 连接：`127.0.0.1:11434` 与 `.env` 指向的 `127.0.0.1:7863` 均返回 `[WinError 10051]`，`test_server.py` 的 12 项也在 `socketpair` 阶段失败。该限制只说明验收沙箱不能执行这些路径，不构成代码失败。
+
+以下路径已由用户在本机终端执行，输出已保存为日志，验收会话逐项核对字段：
+
+| 路径 | 日志 | 结果 |
+| --- | --- | --- |
+| 默认 Ollama 一句话五图种 | `out/verify2/local_sentence_ollama.txt` | 5/5 `rendered`，审查 R01–R10 无 fail |
+| `.env` 外部 API 连通 + 一句话点图 | `out/verify2/local_external_api.txt` | `connectivity.ok=true`，`status=rendered` |
+| `.env` 外部 API 一句话五图种 | `out/verify2/local_sentence_external.txt` | 5/5 `rendered`，审查无 fail |
+| 全量 pytest | `out/verify2/local_pytest.txt` | `328 passed, 4 warnings in 27.09s` |
+
+执行者与时间：用户本机终端，2026-11-16 19:23–19:27。验收会话未直接运行这四条命令，只核对日志内容与字段；这一点如实记录，不写成验收会话的实测。
+
+### 10.7 结论
+
+**第 2 轮复验：通过。**
+
+首轮两处用户可见缺陷已修复并实测：overlay 图幅恢复区域范围（比例尺 50 km、指北针不压面）；choropleth / buffer 图底注记不再出现与面状渲染矛盾的「降级为点图」。一句话标题占位符问题随本机一句话五图种审查通过而关闭。
+
+SPEC 第 5 节 9 条全部通过：第 2–6、8 条由验收会话实测；第 1、7、9 条由用户本机终端复跑补齐，日志已核对。验收对象固定为 `ea3e128`，复验期间未修改源码；复验记录单独提交入本分支，本轮未推送。
+
+后续：合并与推送需用户另行授权。合并前按工程规则第 1 条执行 `git fetch origin`，确认 `HEAD..origin/main` 为 0；本轮未推送。
