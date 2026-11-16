@@ -206,6 +206,10 @@ def normalize_parse(raw: Mapping[str, Any] | None) -> RequestParse:
     missing = [name for name in ("place", "time", "metric") if not request[name]]
 
     model_questions = [_clean(item) for item in (data.get("questions") or []) if _clean(item)]
+    if not missing:
+        # 三项齐全时不再反问：模型偶尔会额外返回 questions，若照搬会阻断出图（T25 实测修复）。
+        return RequestParse(request=request, questions=[], raw=data or None)
+
     questions = model_questions[:MAX_QUESTIONS]
     needed = min(len(missing), MAX_QUESTIONS)
     if len(questions) < needed:

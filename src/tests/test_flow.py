@@ -142,6 +142,21 @@ def test_normalize_parse_prefers_model_questions_and_limits_to_two():
     assert parsed.questions == ["要哪一天的？", "画哪个指标？"]
 
 
+def test_normalize_parse_ignores_questions_when_fields_complete():
+    """三项齐全时不再反问：模型多余的 questions 不应阻断出图（T25）。"""
+    parsed = flow.normalize_parse(
+        {
+            "place": "徐州",
+            "time": "2026-11-01",
+            "metric": "PM2.5",
+            "questions": ["想画哪个城市或区县？", "要哪一天的数据？"],
+        }
+    )
+
+    assert parsed.request == {"place": "徐州", "time": "2026-11-01", "metric": "PM2_5_24h"}
+    assert parsed.questions == []
+
+
 def test_parse_request_uses_data_steward_prompt():
     captured: dict = {}
 
