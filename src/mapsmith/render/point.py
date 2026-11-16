@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
@@ -28,6 +29,7 @@ from ..io.models import DataError
 from ..spec import MapSpec
 from .choropleth import _aspect_for, _transformed_extent, class_index
 from .extent import drawing_extent
+from .fonts import load_chinese_font
 from .layout import (
     LayoutReport,
     apply_layout,
@@ -45,6 +47,125 @@ FALLBACK_SIZE = 200.0
 MISSING_EDGE = "#999999"  # 缺测点空心边色
 EDGE_COLOR = "#666666"
 DEFAULT_POINT_COLOR = "#1f77b4"  # 无分级时的单色
+
+# 标注避让：依次尝试 8 个方向，取与气泡、已放置标签重叠最小且在坐标区内的位置。
+_LABEL_OFFSETS = (
+    (1.0, 0.0),
+    (1.0, 1.0),
+    (0.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 0.0),
+    (-1.0, -1.0),
+    (0.0, -1.0),
+    (1.0, -1.0),
+)
+_LABEL_FONT_PT = 8.0
+_LABEL_PAD_PT = 3.0
+_LABEL_HALO_PT = 2.5
+_LABEL_HALO_COLOR = "#ffffff"
+
+
+def _rect(bbox: Any) -> tuple[float, float, float, float]:
+    """matplotlib Bbox → (x0, y0, x1, y1)，便于做重叠面积计算。"""
+    return (float(bbox.x0), float(bbox.y0), float(bbox.x1), float(bbox.y1))
+
+
+def _rect_area(rect: tuple[float, float, float, float]) -> float:
+    return max(0.0, rect[2] - rect[0]) * max(0.0, rect[3] - rect[1])
+
+
+def _rect_overlap(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    if width <= 0.0 or height <= 0.0:
+        return 0.0
+    return width * height
+
+
+def _label_score(
+    rect: tuple[float, float, float, float],
+    obstacles: list[tuple[float, float, float, float]],
+    placed: list[tuple[float, float, float, float]],
+    frame: tuple[float, float, float, float],
+) -> float:
+    """分数越低越好：压气泡、压已放置标签、越出坐标区分别按权重累计。"""
+    score = sum(_rect_overlap(rect, item) for item in obstacles)
+    score += 2.0 * sum(_rect_overlap(rect, item) for item in placed)
+    score += 3.0 * (_rect_area(rect) - _rect_overlap(rect, frame))
+    return score
+
+
+def _place_labels(
+    fig: Any,
+    ax: Any,
+    xs: Any,
+    ys: Any,
+    labels: Any,
+    sizes: Any,
+) -> None:
+    """逐点放置标注：优先选不压气泡、不压已放置标签、不出坐标区的方向。
+
+    8 个方向都无法避免碰撞时，取重叠面积最小的方向，并给文字加白色描边，
+    保证压在气泡上仍然可读。字体在此显式加载，避免在 `apply_layout` 之前
+    用默认西文字体测量中文宽度。
+    """
+    font = load_chinese_font()
+    try:
+        renderer = fig.canvas.get_renderer()
+    except AttributeError:  # 部分交互后端在首次绘制前没有 renderer
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+
+    display = ax.transData.transform(np.column_stack([xs, ys]))
+    dpi = float(fig.dpi)
+    radii = np.sqrt(np.clip(np.asarray(sizes, dtype=float), 0.0, None)) / 2.0 * dpi / 72.0
+    obstacles = [
+        (float(px - r), float(py - r), float(px + r), float(py + r))
+        for (px, py), r in zip(display, radii)
+    ]
+    frame = (float(ax.bbox.x0), float(ax.bbox.y0), float(ax.bbox.x1), float(ax.bbox.y1))
+    placed: list[tuple[float, float, float, float]] = []
+    halo = [path_effects.withStroke(linewidth=_LABEL_HALO_PT, foreground=_LABEL_HALO_COLOR)]
+
+    for xi, yi, radius, text in zip(xs, ys, radii, labels):
+        offset = radius * 72.0 / dpi + _LABEL_PAD_PT
+        best: tuple[float, float] | None = None
+        best_score: float | None = None
+        for ux, uy in _LABEL_OFFSETS:
+            dx, dy = ux * offset, uy * offset
+            probe = ax.annotate(
+                str(text),
+                (xi, yi),
+                textcoords="offset points",
+                xytext=(dx, dy),
+                fontsize=_LABEL_FONT_PT,
+                fontfamily=font,
+            )
+            score = _label_score(
+                _rect(probe.get_window_extent(renderer)), obstacles, placed, frame
+            )
+            probe.remove()
+            if best_score is None or score < best_score:
+                best_score = score
+                best = (dx, dy)
+            if score == 0.0:
+                break
+        if best is None:
+            continue
+        dx, dy = best
+        artist = ax.annotate(
+            str(text),
+            (xi, yi),
+            textcoords="offset points",
+            xytext=(dx, dy),
+            fontsize=_LABEL_FONT_PT,
+            fontfamily=font,
+            zorder=6,
+        )
+        artist.set_path_effects(halo)
+        placed.append(_rect(artist.get_window_extent(renderer)))
 
 
 def _fmt(value: float) -> str:
@@ -281,8 +402,7 @@ def render_point(
 
     # --- 标注 ---
     if label_field is not None and spec.annotation.show:
-        for xi, yi, text in zip(x, y, frame[label_field].astype(str)):
-            ax.annotate(str(text), (xi, yi), textcoords="offset points", xytext=(5, 5), fontsize=8)
+        _place_labels(fig, ax, x, y, frame[label_field].astype(str).tolist(), sizes_arr)
 
     # --- 气泡大小三级图例（先画并 add_artist，让 apply_layout 的断点图例成为主图例）---
     if (
