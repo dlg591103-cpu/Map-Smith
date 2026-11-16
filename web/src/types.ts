@@ -63,6 +63,9 @@ export interface FormState {
   n: number
   palette_scheme: string
   palette_reverse: boolean
+  // T25：buffer / overlay 专用参数
+  buffer_km: string
+  overlay_op: string
 }
 
 export const FIELD_OPTIONS = [
@@ -75,7 +78,7 @@ export const FIELD_OPTIONS = [
   'AQI',
 ]
 
-export const MAP_TYPES = ['choropleth', 'point', 'idw']
+export const MAP_TYPES = ['choropleth', 'point', 'idw', 'buffer', 'overlay']
 
 export const METHODS = ['quantile', 'jenks', 'equal_interval', 'custom']
 

@@ -1,8 +1,29 @@
 {
-  "version": "2026-11-09",
+  "version": "2026-11-16",
   "source": "离线最小索引：adcode 为国家行政区划代码；完整清单应取自 DataV GeoAtlas areas_v3/bound/all.json（未在本机验证，沙箱出站被拦截）",
   "crs_note": "DataV 边界数据来源于高德开放平台，坐标系疑为 GCJ-02，尚未在本机实测偏移",
   "places": [
+    {
+      "name": "广东省",
+      "full_name": "广东省",
+      "adcode": "440000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "广州",
+      "full_name": "广州市",
+      "adcode": "440100",
+      "level": "city",
+      "parent": "广东省",
+      "bbox": [
+        112.9534,
+        22.5173,
+        114.0548,
+        23.9356
+      ],
+      "bbox_source": "本地边界 440100_full.json GCJ-02 纠偏后实测（2026-11-16）"
+    },
     {
       "name": "江苏省",
       "full_name": "江苏省",

@@ -33,8 +33,8 @@ from .spec import (
 from .tools.classify import classify
 from .tools.load_layer import load_admin, load_air
 
-# 本段界面支持的图种；buffer / overlay 不在本段范围内（SPEC 契约缺口，待决策）。
-SUPPORTED_MAP_TYPES = ("choropleth", "point", "idw")
+# 界面支持的图种（T25：buffer / overlay 已接入，见 docs/Spec/T25 第 3 节）。
+SUPPORTED_MAP_TYPES = ("choropleth", "point", "idw", "buffer", "overlay")
 
 # 分级方法白名单，与 spec.Classification.method 一致。
 SUPPORTED_METHODS = ("quantile", "jenks", "equal_interval", "custom")
@@ -66,8 +66,7 @@ def build_spec(fields: dict[str, Any]) -> MapSpec:
     map_type = fields.get("map_type")
     if map_type not in SUPPORTED_MAP_TYPES:
         raise DataError(
-            f"图种 {map_type!r} 不受支持；本段仅支持 {'、'.join(SUPPORTED_MAP_TYPES)}"
-            "（buffer / overlay 尚未实现，待 SPEC 决策）"
+            f"图种 {map_type!r} 不受支持；可用 {'、'.join(SUPPORTED_MAP_TYPES)}"
         )
 
     field_name = fields.get("field")

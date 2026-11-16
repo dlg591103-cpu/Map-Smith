@@ -164,11 +164,13 @@ def draw_legend(
     *,
     unit: str | None = None,
     anchor: tuple[float, float] | None = None,
+    note: str | None = None,
 ) -> None:
     """图例（第 2 条：分级断点与单位；第 6 条：分级方法注明）。
 
     ``anchor`` 给出时用 `bbox_to_anchor` 把图例放到坐标轴外（choropleth 的主体占满图幅，
     图例放进去会压住面要素），缺省仍留在右下角。
+    ``note`` 是图例副标题，用于 buffer 图注明半径与参与站点数；内容仍来自 spec.notes。
     """
     classification = spec.classification
     if classification is None:
@@ -182,6 +184,8 @@ def draw_legend(
     title = classification_note(spec)
     if unit:
         title += f"（单位：{unit}）"
+    if note:
+        title = f"{title}\n{note}"
     if anchor is not None:
         ax.legend(handles=patches, loc="upper left", bbox_to_anchor=anchor, title=title)
         return
@@ -498,6 +502,7 @@ def apply_layout(
     legend_anchor: tuple[float, float] | None = None,
     north_arrow_anchor: tuple[float, float] | None = None,
     extra_note: str | None = None,
+    legend_note: str | None = None,
     north_arrow_candidates: list[tuple[float, float, float, float, float]] | None = None,
 ) -> LayoutReport:
     """按 spec.layout 的标志补齐版式要素，并加载中文字体。
@@ -506,6 +511,7 @@ def apply_layout(
     - 比例尺 / 指北针 / 来源注记 / 坐标注记由渲染层补齐。
     - `extent_m` 未给时按 spec.extent.bbox 自动换算米制范围。
     - `extra_note` 是渲染层补充说明，追加进底部注记，不改变 spec.notes 语义。
+    - `legend_note` 是图例副标题，用于 buffer 图注明半径与参与站点数。
     - `north_arrow_candidates` 透传给 ``draw_north_arrow``，控制指北针候选位置与避让。
     """
     font = load_chinese_font()
@@ -515,7 +521,7 @@ def apply_layout(
     report.drawn.append("图名")
 
     if spec.layout.legend and spec.classification is not None:
-        draw_legend(ax, spec, unit=unit, anchor=legend_anchor)
+        draw_legend(ax, spec, unit=unit, anchor=legend_anchor, note=legend_note)
         report.drawn.append("图例")
 
     if spec.layout.scale_bar:

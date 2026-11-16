@@ -20,6 +20,31 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 SRC_ROOT = PACKAGE_DIR.parent
 PROJECT_ROOT = SRC_ROOT.parent
 
+# LLM 默认值（T25）：默认走本机 Ollama，用户可用 `.env` 或环境变量覆盖为外部 API。
+# api_key 对 Ollama 无实际意义，占位仅为满足三要素校验；不得写入任何日志。
+DEFAULT_LLM_BASE_URL = "http://127.0.0.1:11434/v1"
+DEFAULT_LLM_API_KEY = "ollama"
+DEFAULT_LLM_MODEL = "qwen2.5:3b"
+
+
+def _load_dotenv(path: Path) -> None:
+    """读取项目根 `.env`（KEY=VALUE），不覆盖已存在的环境变量。
+
+    不引入 python-dotenv：只支持最简单的 KEY=VALUE 与 # 注释，
+    值两端的成对引号会被去掉。`.env` 已在 .gitignore 中，不会入库。
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
 
 def _env_text(name: str) -> str | None:
     raw = os.environ.get(ENV_PREFIX + name)
@@ -73,12 +98,19 @@ class Settings:
     max_global_rounds: int = 8
     global_timeout_s: float = 60.0
 
-    # LLM 配置，来源：docs/Spec/T22-一句话入口与loop接入.md 第 4 节。
+    # LLM 配置，来源：docs/Spec/T22 第 4 节、docs/Spec/T25 第 3 节。
+    # 默认走本机 Ollama（T25）；`.env` / 环境变量可覆盖为外部 API。
     # 三项必填任一为空即视为未配置；api_key 不进入 as_dict()。
-    llm_base_url: str | None = None
-    llm_api_key: str | None = None
-    llm_model: str | None = None
+    llm_base_url: str | None = DEFAULT_LLM_BASE_URL
+    llm_api_key: str | None = DEFAULT_LLM_API_KEY
+    llm_model: str | None = DEFAULT_LLM_MODEL
     llm_timeout_s: float = 30.0
+
+    @property
+    def llm_provider(self) -> str:
+        """粗分「本地 Ollama」与「外部 API」，用于错误提示与界面展示。"""
+        url = (self.llm_base_url or "").lower()
+        return "ollama" if ("11434" in url or "ollama" in url) else "external"
 
     @property
     def llm_configured(self) -> bool:
@@ -88,6 +120,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         """读取环境变量覆盖后的配置；非法数值直接报错，不静默回落。"""
+        _load_dotenv(PROJECT_ROOT / ".env")
         return cls(
             project_root=_env_path("PROJECT_ROOT", PROJECT_ROOT),
             src_root=_env_path("SRC_ROOT", SRC_ROOT),
@@ -97,9 +130,9 @@ class Settings:
             max_rework_rounds=_env_int("MAX_REWORK_ROUNDS", 2),
             max_global_rounds=_env_int("MAX_GLOBAL_ROUNDS", 8),
             global_timeout_s=_env_float("GLOBAL_TIMEOUT_S", 60.0),
-            llm_base_url=_env_text("LLM_BASE_URL"),
-            llm_api_key=_env_text("LLM_API_KEY"),
-            llm_model=_env_text("LLM_MODEL"),
+            llm_base_url=_env_text("LLM_BASE_URL") or DEFAULT_LLM_BASE_URL,
+            llm_api_key=_env_text("LLM_API_KEY") or DEFAULT_LLM_API_KEY,
+            llm_model=_env_text("LLM_MODEL") or DEFAULT_LLM_MODEL,
             llm_timeout_s=_env_float("LLM_TIMEOUT_S", 30.0),
         )
 
@@ -116,6 +149,7 @@ class Settings:
             "global_timeout_s": self.global_timeout_s,
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
+            "llm_provider": self.llm_provider,
             "llm_timeout_s": self.llm_timeout_s,
             "llm_configured": self.llm_configured,
         }

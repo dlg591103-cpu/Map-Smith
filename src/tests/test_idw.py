@@ -266,20 +266,10 @@ def test_render_dispatches_idw() -> None:
     plt.close("all")
 
 
-def test_render_dispatches_overlay() -> None:
-    from mapsmith.render.compose import OverlayReport
-
-    base = gpd.GeoDataFrame(
-        geometry=[box(116.0, 34.0, 117.5, 34.8)], crs="EPSG:4326"
-    )
-    other = gpd.GeoDataFrame(
-        geometry=[box(117.0, 34.3, 118.5, 35.0)], crs="EPSG:4326"
-    )
-    spec = make_idw_spec(
-        map_type="overlay",
-        classification=None,
-        layers=[Layer(id="base", kind="admin"), Layer(id="data", kind="overlay")],
-    )
-    report = render(spec, base, other_gdf=other)
-    assert isinstance(report, OverlayReport)
+def test_render_unimplemented_map_type_still_raises() -> None:
+    spec = make_idw_spec(layers=[Layer(id="data", kind="idw", field="pm25")])
+    # T25 起五种图种均已实现；用绕过校验的未知图种确认兜底分支仍会抛错。
+    bogus = spec.model_copy(update={"map_type": "raster"})
+    with pytest.raises(NotImplementedError, match="尚未实现"):
+        render(bogus, make_point_gdf([30, 45, 55]))
     plt.close("all")

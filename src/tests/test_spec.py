@@ -120,8 +120,9 @@ def test_map_type_requires_matching_layer():
     [
         ("choropleth", {"id": "data", "kind": "choropleth", "field": "PM2_5"}),
         ("point", {"id": "data", "kind": "point"}),
-        ("buffer", {"id": "data", "kind": "buffer"}),
-        ("overlay", {"id": "data", "kind": "overlay"}),
+        # T25：buffer / overlay 结果面按分级设色，同样需要 field。
+        ("buffer", {"id": "data", "kind": "buffer", "field": "buffer_value"}),
+        ("overlay", {"id": "data", "kind": "overlay", "field": "PM2_5"}),
     ],
 )
 def test_other_map_types_minimal(map_type, layer):

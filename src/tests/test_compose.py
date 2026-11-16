@@ -19,7 +19,6 @@ from matplotlib.colors import to_rgba  # noqa: E402
 from shapely.geometry import Point, box  # noqa: E402
 
 from mapsmith.io.models import DataError  # noqa: E402
-from mapsmith.render import render  # noqa: E402
 from mapsmith.render.compose import (  # noqa: E402
     BUFFER_ALPHA,
     OVERLAY_ALPHA,
@@ -39,7 +38,7 @@ def make_buffer_spec(**overrides) -> MapSpec:
         title="徐州市 PM2.5 站点 5 km 缓冲区图（2026-11-01）",
         map_type="buffer",
         extent=Extent(adcode="320300", bbox=BBOX),
-        layers=[Layer(id="data", kind="buffer")],
+        layers=[Layer(id="data", kind="buffer", field="pm25")],
         classification=None,
         palette=Palette(scheme="YlOrRd", reverse=False),
         data_source_note="数据来源：全国城市空气质量实时发布平台（quotsoft.net），更新时间 2026-11-01",
@@ -55,7 +54,7 @@ def make_overlay_spec(**overrides) -> MapSpec:
         title="徐州市空间叠加图（2026-11-01）",
         map_type="overlay",
         extent=Extent(adcode="320300", bbox=BBOX),
-        layers=[Layer(id="base", kind="admin"), Layer(id="data", kind="overlay")],
+        layers=[Layer(id="base", kind="admin"), Layer(id="data", kind="overlay", field="pm25")],
         classification=None,
         palette=Palette(scheme="YlOrRd", reverse=False),
         data_source_note="数据来源：全国城市空气质量实时发布平台（quotsoft.net），更新时间 2026-11-01",
@@ -109,18 +108,18 @@ def _collection_alpha(coll) -> float:
     return float(coll.get_facecolors()[0][3])
 
 
-# --- 分派 ---
+# --- compose 渲染器（集成后总入口仍走 choropleth，compose 保留待评估） ---
 
 
-def test_render_dispatches_buffer() -> None:
-    report = render(make_buffer_spec(), make_buffer_gdf())
+def test_render_buffer_returns_report() -> None:
+    report = render_buffer(make_buffer_spec(), make_buffer_gdf())
     assert isinstance(report, BufferReport)
     plt.close("all")
 
 
-def test_render_dispatches_overlay() -> None:
+def test_render_overlay_returns_report() -> None:
     base, other = make_overlay_gdfs()
-    report = render(make_overlay_spec(), base, other_gdf=other)
+    report = render_overlay(make_overlay_spec(), base, other_gdf=other)
     assert isinstance(report, OverlayReport)
     plt.close("all")
 

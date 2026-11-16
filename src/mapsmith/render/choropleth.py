@@ -160,7 +160,29 @@ def render_choropleth(
     ax.set_ylim(miny, maxy)
 
     # 主体占满图幅，图例放到图框外右侧，避免压住面要素。
-    layout = apply_layout(fig, ax, spec, unit=unit, legend_anchor=(1.02, 1.0))
+    # buffer 图按 SPEC 3.1 把半径与参与站点数写进图例副标题；文字取自 spec.notes，
+    # 渲染层不改写内容，也不据此推断任何数据结论。
+    legend_note = None
+    if spec.map_type == "buffer":
+        buffer_note = next((note for note in spec.notes if note.startswith("缓冲距离")), None)
+        if buffer_note:
+            # 图例框宽度由色块标签决定，长句会溢出边框；这里只取前两段并拆成两行，
+            # 完整的缺失值说明仍保留在底部注记。
+            parts = [part.strip() for part in buffer_note.split("；") if part.strip()]
+            if len(parts) >= 2:
+                # 第二段形如「9/10 个缓冲面含站点，无站点缓冲面按缺失处理」，逗号后的说明留在底部注记。
+                second = parts[1].split("，")[0].replace("个缓冲面含站点", "面含站点")
+                legend_note = f"{parts[0]}\n{second}"
+            else:
+                legend_note = parts[0] if parts else None
+    layout = apply_layout(
+        fig,
+        ax,
+        spec,
+        unit=unit,
+        legend_anchor=(1.02, 1.0),
+        legend_note=legend_note,
+    )
 
     # 地理坐标系下 1° 纬度和 1° 经度的实际长度不同，aspect 已按纬度修正；此时地图在
     # 图幅内上下留白，把底部注记挪到图框正下方，避免图名与注记之间出现大片空白。

@@ -32,7 +32,22 @@
 
 ## 必须遵守
 
-1. **图种由 `decision` 决定**：`idw` → `map_type=idw`；`degrade` → `point`（站数多、需要表达量级时用气泡）；`reject` → 不输出 spec。
+1. **图种判定顺序：先看原话，再看 `decision`**。
+   - 原话出现「缓冲区 / 缓冲分析 / 半径 X 公里」→ `map_type=buffer`，`buffer_km` 取原话公里数（缺省 5）。**这一条优先于 `decision`。**
+   - 原话出现「叠加 / 裁剪 / clip / intersection」→ `map_type=overlay`，`overlay_op` 取 `clip` 或 `intersection`。**这一条优先于 `decision`。**
+   - 两者都没有时按 `decision`：`idw` → `map_type=idw`；`choropleth` → `map_type=choropleth`；`degrade` → `point`（站数多、需要表达量级时用气泡）；`reject` → 不输出 spec。
+
+   buffer / overlay 的 `field` 由系统决定（buffer 为缓冲区内站点均值），你只需决定图种、距离或操作、分级方法与配色。
+
+   示例：
+
+   ```text
+   用户：用徐州 2026-11-01 的 PM2.5 做 5 公里缓冲区分析
+   输出：{"map_type": "buffer", "buffer_km": 5, "classification": {"method": "quantile", "n": 5}, "palette": {"scheme": "YlOrRd"}}
+
+   用户：用徐州 2026-11-01 的 PM2.5 做裁剪叠加分析
+   输出：{"map_type": "overlay", "overlay_op": "clip", "classification": {"method": "quantile", "n": 5}, "palette": {"scheme": "YlOrRd"}}
+   ```
 2. **`title` 必须同时含区域、指标、日期**，缺一即审查不过。
 3. **`data_source_note` 必须带日期**，格式 `YYYY-MM-DD`。
 4. **`notes` 原样写入 `reason_lines` 三行**，不改写、不删减。

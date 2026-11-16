@@ -51,16 +51,16 @@ def test_placeholder_rules_match_known_registry() -> None:
     )
 
 
-def test_apply_spec_patch_writes_placeholder_verbatim() -> None:
-    """复现缺陷：apply_spec_patch 不校验补丁内容，占位符会原样进入 spec。
+def test_apply_spec_patch_skips_placeholder() -> None:
+    """T25 修复后的回归：占位符补丁不得写入 spec，原标题保留。
 
-    本用例锁定当前行为，便于修正规则库后回归对比；
-    它断言的是「缺陷确实存在」，不是「行为正确」。
+    修复前本用例锁定的是「缺陷确实存在」；T25 在 `apply_spec_patch` 中过滤
+    ``<...>`` 占位符后，改为护栏断言，防止占位符再次进入 spec.title。
     """
     spec = {"title": "原标题", "map_type": "point"}
     patched = apply_spec_patch(spec, {"title": "<区域><指标><时间>图"})
-    assert patched["title"] == "<区域><指标><时间>图"
-    assert _PLACEHOLDER.search(patched["title"])
+    assert patched["title"] == "原标题"
+    assert not _PLACEHOLDER.search(patched["title"])
 
 
 def test_apply_spec_patch_keeps_real_values() -> None:

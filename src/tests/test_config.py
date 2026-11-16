@@ -50,6 +50,34 @@ def test_get_settings_is_cached():
     get_settings.cache_clear()
 
 
+def test_default_llm_is_local_ollama():
+    """T25：默认预置本机 Ollama，用户可用 .env / 环境变量覆盖。"""
+    settings = Settings()
+    assert settings.llm_provider == "ollama"
+    assert settings.llm_base_url == "http://127.0.0.1:11434/v1"
+    assert settings.llm_model == "qwen2.5:3b"
+    assert settings.llm_configured is True
+
+
+def test_dotenv_loaded_without_overriding_env(monkeypatch, tmp_path):
+    from mapsmith.config import _load_dotenv
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "# 注释行\nMAPSMITH_LLM_MODEL=deepseek-chat\n"
+        'MAPSMITH_LLM_BASE_URL="https://api.deepseek.com/v1"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("MAPSMITH_LLM_MODEL", raising=False)
+    monkeypatch.setenv("MAPSMITH_LLM_BASE_URL", "https://keep.example/v1")
+
+    _load_dotenv(dotenv)
+
+    assert os.environ["MAPSMITH_LLM_MODEL"] == "deepseek-chat"
+    # 已存在的环境变量优先，.env 不覆盖。
+    assert os.environ["MAPSMITH_LLM_BASE_URL"] == "https://keep.example/v1"
+
+
 def test_subpackages_importable():
     for name in [
         "mapsmith.io",

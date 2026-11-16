@@ -68,6 +68,10 @@ def test_csv_without_coordinates_is_a_table(tmp_path) -> None:
 
     assert layer.kind == "table"
     assert layer.gdf is None
+    # T14 契约缺口修复：统计表的数据行必须保留，供 analyze.join 使用。
+    assert layer.table is not None
+    assert len(layer.table) == 1
+    assert list(layer.table.columns) == ["城市", "PM2_5_24h"]
     assert layer.meta["crs_status"] == "not_applicable"
     assert ensure_crs(layer) is layer
 
