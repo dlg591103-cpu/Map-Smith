@@ -15,7 +15,15 @@ from mapsmith.loop import LoopResult
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path: Path):
-    settings = Settings(output_dir=tmp_path, project_root=tmp_path)
+    # T25 起 config 默认走本机 Ollama；这里显式清空三项，恢复「未配置模型」的前提，
+    # 供 health 与 chat 的未配置分支使用。需要模型已配置的用例各自 monkeypatch。
+    settings = Settings(
+        output_dir=tmp_path,
+        project_root=tmp_path,
+        llm_base_url=None,
+        llm_api_key=None,
+        llm_model=None,
+    )
     monkeypatch.setattr(server, "get_settings", lambda: settings)
     server.UPLOAD_REGISTRY.clear()
     return TestClient(server.app)
