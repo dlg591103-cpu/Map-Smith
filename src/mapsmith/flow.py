@@ -34,6 +34,7 @@ from .io.uploads import ensure_crs, parse_upload
 from .loop import FIELD_QUESTIONS, LoopResult
 from .loop import run as loop_run
 from .spec import MapSpec
+from .tools.analyze import buffer_layer, buffer_metric_stats, clip_layer, overlay_layer
 from .tools.inspect import DataProfile, profile_points
 from .tools.load_layer import load_admin
 from .ui import (
@@ -364,6 +365,21 @@ def _clamp_int(value: Any, *, default: int, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
+def _buffer_km(value: Any, *, default: float = 5.0, low: float = 0.1, high: float = 200.0) -> float:
+    """解析缓冲距离（km）；缺省用 5，非法或超范围直接报错，不静默截断。"""
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise DataError(f"缓冲距离必须是数字（公里），实际为 {value!r}") from exc
+    if number <= 0:
+        raise DataError(f"缓冲距离必须为正数（公里），实际为 {number:g}")
+    if not (low <= number <= high):
+        raise DataError(f"缓冲距离需在 {low:g}–{high:g} km 之间，实际为 {number:g}")
+    return number
+
+
 def _region_label(place: str) -> str:
     """图名里的区域要素：审查要求带行政区后缀，缺省时补「市」。"""
     if re.search(r"(省|市|区|县|自治州|自治区|特别行政区|盟|旗)$", place):
@@ -533,7 +549,10 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
 
 
 def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str, Any]) -> MapSpec:
-    """表单路径：图种、方法、级数、配色全部由用户指定。"""
+    """表单路径：图种、方法、级数、配色全部由用户指定。
+
+    T25 起支持 buffer / overlay：先做确定性分析，再对结果面图层分级设色。
+    """
     request = parse.request
     place = request["place"]
     date = request["time"]
@@ -544,14 +563,56 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
         raise DataError("图层没有几何，无法制图")
 
     map_type = _clean(form.get("map_type")) or "point"
-    if map_type not in {"choropleth", "point", "idw"}:
-        raise DataError(f"图种 {map_type!r} 不受支持；可用 choropleth / point / idw")
+    if map_type not in {"choropleth", "point", "idw", "buffer", "overlay"}:
+        raise DataError(
+            f"图种 {map_type!r} 不受支持；可用 choropleth / point / idw / buffer / overlay"
+        )
+
+    analysis = None
+    spec_field = field_name
+    extra_notes: list[str] = []
     if map_type == "choropleth":
         if loaded.get("admin") is None or loaded["admin"].gdf is None:
             raise DataError("choropleth 需要面数据：请上传面图层或使用 demo_data 边界")
+    elif map_type == "buffer":
+        points = loaded.get("points")
+        if points is None or points.gdf is None:
+            raise DataError("buffer 需要点数据：请上传点位数据或使用 demo_data 站点")
+        distance = _buffer_km(form.get("buffer_km"))
+        buffers = buffer_layer(points, distance)
+        analysis = buffer_metric_stats(buffers, points, field_name)
+        spec_field = "buffer_value"
+        covered = int(analysis.gdf["buffer_value"].notna().sum())
+        extra_notes.append(
+            f"缓冲距离 {distance:g} km；{covered}/{len(analysis.gdf)} 个缓冲面含站点，"
+            "无站点缓冲面按缺失处理"
+        )
+    elif map_type == "overlay":
+        if layer.kind != "admin" or layer.gdf is None:
+            raise DataError("overlay 需要上传面图层作为主体；第二图层使用 demo_data 边界")
+        boundary = loaded.get("admin")
+        if boundary is None or boundary.gdf is None:
+            raise DataError("overlay 需要第二图层：请选择区域以加载 demo_data 边界")
+        op = _clean(form.get("overlay_op")) or "clip"
+        if op == "clip":
+            analysis = clip_layer(layer, boundary)
+        elif op in {"intersection", "overlay"}:
+            analysis = overlay_layer(layer, boundary, how="intersection")
+        else:
+            raise DataError(f"叠加方式 {op!r} 不受支持；可用 clip / intersection")
+        spec_field = (
+            field_name
+            if field_name in analysis.gdf.columns
+            else next(iter(_numeric_columns(analysis)), field_name)
+        )
+        extra_notes.append(f"叠加方式：{analysis.meta.get('op', op)}；第二图层：{boundary.name}")
     else:
         if loaded.get("points") is None:
             raise DataError(f"{map_type} 需要点数据：请上传点位数据或使用 demo_data 站点")
+
+    target = analysis.gdf if analysis is not None else gdf
+    if isinstance(loaded, dict) and analysis is not None:
+        loaded["analysis_layer"] = analysis
 
     method = _clean(form.get("method")) or "quantile"
     if method not in SUPPORTED_METHODS:
@@ -562,15 +623,31 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
         raise DataError(f"配色 {scheme!r} 属于禁用彩虹色；请换用单色渐变")
     unit = METRIC_UNITS.get(field_name)
 
-    if field_name == "AQI":
+    if field_name == "AQI" and map_type in {"point", "idw", "choropleth"}:
         method, n, breaks = "custom", 6, list(AQI_BREAKS)
         scheme, unit = AQI_SCHEME, AQI_UNIT
+    elif map_type in {"buffer", "overlay"}:
+        # 缓冲/叠加后的面数有限，级数超过有效面时无法分级：逐级下调并在 notes 说明。
+        breaks = None
+        for attempt in range(n, 1, -1):
+            try:
+                breaks = _breaks_for(target, spec_field, method, attempt)
+            except DataError:
+                continue
+            if attempt != n:
+                extra_notes.append(f"分级数由 {n} 自动降为 {attempt}：有效面数不足以分 {n} 级")
+            n = attempt
+            break
+        if breaks is None:
+            raise DataError(
+                f"{spec_field} 的有效面不足 2 个，无法分级；请扩大分析范围或改用其他图种"
+            )
     else:
-        breaks = _breaks_for(gdf, field_name, method, n)
+        breaks = _breaks_for(target, spec_field, method, n)
 
-    notes = _merge_notes(loaded.get("reason_lines"), [])
+    notes = _merge_notes(loaded.get("reason_lines"), extra_notes)
     label_field = _clean(form.get("label_field")) or None
-    if label_field is not None and label_field not in gdf.columns:
+    if label_field is not None and label_field not in target.columns:
         label_field = None
     return build_spec(
         {
@@ -578,7 +655,7 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
             "map_type": map_type,
             "adcode": loaded["admin"].meta.get("adcode") if loaded.get("admin") else None,
             "bbox": _bbox_for(loaded, map_type),
-            "field": field_name,
+            "field": spec_field,
             "method": method,
             "n": n,
             "breaks": breaks,
@@ -739,6 +816,11 @@ def _to_mapspec(spec: Any) -> MapSpec:
 
 
 def _render_frame(map_spec: MapSpec, loaded: Mapping[str, Any]) -> Any:
+    # T25：buffer / overlay 的分析结果面图层优先（分级设色直接渲染该图层）。
+    analysis = loaded.get("analysis_layer")
+    if analysis is not None and getattr(analysis, "gdf", None) is not None:
+        return analysis.gdf
+
     points = loaded.get("points")
     layer = loaded.get("layer")
     field_name = map_spec.layers[0].field

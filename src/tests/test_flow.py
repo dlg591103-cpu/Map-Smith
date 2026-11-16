@@ -354,6 +354,32 @@ class FakeRender:
         return RenderResult(png_path=png, pdf_path=pdf, report=None)
 
 
+def test_form_spec_builds_buffer_spec():
+    """T25：buffer 走确定性分析，spec 字段为 buffer_value，结果面图层交给渲染。"""
+    loaded = make_loaded()
+    spec = flow._form_spec(
+        flow.RequestParse(request()),
+        {"map_type": "buffer", "buffer_km": "5", "method": "quantile", "n": 5},
+        loaded,
+    )
+
+    assert spec.map_type == "buffer"
+    assert spec.layers[0].kind == "buffer"
+    assert spec.layers[0].field == "buffer_value"
+    assert loaded["analysis_layer"].kind == "buffer"
+    assert any("缓冲距离" in note for note in spec.notes)
+
+
+def test_form_spec_rejects_overlay_without_face_layer():
+    loaded = make_loaded()
+    with pytest.raises(DataError, match="上传面图层"):
+        flow._form_spec(
+            flow.RequestParse(request()),
+            {"map_type": "overlay", "overlay_op": "clip"},
+            loaded,
+        )
+
+
 def test_run_form_goes_through_loop(monkeypatch, tmp_path: Path):
     loaded = make_loaded()
     fake_render = FakeRender(tmp_path)

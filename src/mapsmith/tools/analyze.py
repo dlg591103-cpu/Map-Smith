@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 import geopandas as gpd
+import numpy as np
 
 from ..io.models import DataError, DataLayer
 from ..projection import choose_measurement_crs
@@ -238,6 +239,67 @@ def _stats_columns(stats: gpd.GeoDataFrame, table_key: str) -> list[str]:
     if geometry is not None and getattr(geometry, "name", None) is not None:
         geom_name = geometry.name
     return [str(col) for col in stats.columns if str(col) != table_key and str(col) != geom_name]
+
+
+def buffer_metric_stats(
+    buffers: DataLayer,
+    points: DataLayer,
+    field: str,
+    *,
+    column: str = "buffer_value",
+) -> DataLayer:
+    """统计每个缓冲区内的站点指标均值（T25，SPEC 第 3.1 节）。
+
+    - 只统计落在缓冲面内的点；字段缺测值不参与均值。
+    - 无站点落入的缓冲区写 NaN，渲染层按缺失处理，调用方在 notes 说明。
+    - 结果面图层 `kind="buffer"`，新增 `column` 列供分级设色。
+    """
+    buffer_gdf = _require_gdf(buffers)
+    point_gdf = _require_gdf(points)
+    if field not in point_gdf.columns:
+        raise DataError(
+            f"{points.name} 没有字段 {field!r}，现有字段：{list(map(str, point_gdf.columns))}"
+        )
+    if buffer_gdf.crs is None or point_gdf.crs is None:
+        raise DataError("缓冲区或站点图层缺少坐标系，无法统计")
+
+    pts = point_gdf
+    if pts.crs != buffer_gdf.crs:
+        pts = pts.to_crs(buffer_gdf.crs)
+    valid = pts.dropna(subset=[field])
+    if valid.empty:
+        raise DataError(f"字段 {field!r} 没有有效值，无法统计缓冲区内均值")
+
+    # 临时序号列避免依赖 sjoin 的索引列名。
+    tmp = buffer_gdf[["geometry"]].copy()
+    tmp["_buffer_id"] = np.arange(len(tmp))
+    joined = gpd.sjoin(valid, tmp, how="inner", predicate="within")
+    grouped = joined.groupby("_buffer_id")[field].mean()
+
+    out = buffer_gdf.copy()
+    # 注意：缓冲区保留了原点的索引（不一定是 0..n），必须按位置赋值，
+    # 直接按索引对齐会把值写成 NaN。
+    out[column] = grouped.reindex(np.arange(len(out))).to_numpy()
+
+    return DataLayer(
+        kind="buffer",
+        name=buffers.name,
+        source=buffers.source,
+        summary=(
+            f"{buffers.name}：{len(out)} 个缓冲面，按 {field} 统计落在其内的站点均值；"
+            f"{int(out[column].notna().sum())} 个缓冲面有站点，"
+            f"{int(out[column].isna().sum())} 个无站点（按缺失处理）。"
+        ),
+        gdf=out,
+        crs=buffers.crs,
+        meta={
+            "op": "buffer_stats",
+            "field": field,
+            "value_field": column,
+            "buffered": dict(buffers.meta),
+            "source_layer": points.name,
+        },
+    )
 
 
 def join_table(table: DataLayer, to: DataLayer, key: Any) -> DataLayer:

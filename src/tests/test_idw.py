@@ -267,10 +267,9 @@ def test_render_dispatches_idw() -> None:
 
 
 def test_render_unimplemented_map_type_still_raises() -> None:
-    spec = make_idw_spec(
-        map_type="buffer",
-        layers=[Layer(id="data", kind="buffer", field="pm25")],
-    )
+    spec = make_idw_spec(layers=[Layer(id="data", kind="idw", field="pm25")])
+    # T25 起五种图种均已实现；用绕过校验的未知图种确认兜底分支仍会抛错。
+    bogus = spec.model_copy(update={"map_type": "raster"})
     with pytest.raises(NotImplementedError, match="尚未实现"):
-        render(spec, make_point_gdf([30, 45, 55]))
+        render(bogus, make_point_gdf([30, 45, 55]))
     plt.close("all")
