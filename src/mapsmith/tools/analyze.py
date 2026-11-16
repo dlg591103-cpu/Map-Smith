@@ -243,19 +243,20 @@ def _stats_columns(stats: gpd.GeoDataFrame, table_key: str) -> list[str]:
 def join_table(table: DataLayer, to: DataLayer, key: Any) -> DataLayer:
     """把统计表按 key 关联到边界，产出带统计值的面图层。
 
-    - 第一参数 `table` 是无几何统计表，数据行必须保存在 `gdf` 里（正确契约前提）。
+    - 第一参数 `table` 是无几何统计表，数据行保存在 `DataLayer.table`（`gdf` 兜底，
+      兼容旧调用）；T14 契约缺口已由 `io/models.py` + `io/uploads.py` 修复。
     - `to` 是带几何的边界图层；结果保留边界几何与统计字段，供分级设色渲染。
     """
-    if table.gdf is None:
+    stats = table.table if table.table is not None else table.gdf
+    if stats is None:
         raise DataError(
             f"{table.name} 没有携带数据行，无法关联；"
-            "契约缺口：table 图层应把统计表数据保存在 gdf 中（待数据管家补上）"
+            "统计表应保存在 DataLayer.table 中（见 docs/自检/T14-契约缺口报告.md）"
         )
 
     boundary = _require_geometry(to, "作为关联边界")
     table_key, boundary_key = _parse_join_key(key)
 
-    stats = table.gdf
     if table_key not in stats.columns:
         raise DataError(
             f"{table.name} 缺少关联键列 {table_key!r}；可用列：{list(map(str, stats.columns))}"

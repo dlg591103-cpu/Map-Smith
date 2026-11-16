@@ -17,8 +17,15 @@ import requests
 from ..config import Settings, get_settings
 
 MISSING_CONFIG_MESSAGE = (
-    "未配置模型：请设置 MAPSMITH_LLM_BASE_URL / MAPSMITH_LLM_API_KEY / "
-    "MAPSMITH_LLM_MODEL，或在高级表单中出图。"
+    "未配置模型：请在项目根 `.env` 或环境变量中设置 MAPSMITH_LLM_BASE_URL / "
+    "MAPSMITH_LLM_API_KEY / MAPSMITH_LLM_MODEL 接入外部 API，"
+    "或在高级表单中出图。"
+)
+
+OLLAMA_NOT_RUNNING_MESSAGE = (
+    "本地模型未启动：请确认 Ollama 正在运行（命令行执行 ollama serve，或启动 Ollama 应用），"
+    "默认模型 qwen2.5:3b；也可在项目根 `.env` 配置 MAPSMITH_LLM_BASE_URL / "
+    "MAPSMITH_LLM_API_KEY / MAPSMITH_LLM_MODEL 接入外部 API。"
 )
 
 
@@ -110,8 +117,14 @@ def chat_json(
     try:
         response = requests.post(url, json=body, headers=headers, timeout=limit)
     except requests.Timeout as exc:
+        if current.llm_provider == "ollama":
+            raise LLMError(
+                "本地模型响应超时：模型可能仍在加载，请稍后重试或调大 MAPSMITH_LLM_TIMEOUT_S。"
+            ) from exc
         raise LLMError(f"模型调用超时：{limit:.0f} 秒") from exc
     except requests.RequestException as exc:
+        if current.llm_provider == "ollama":
+            raise LLMError(OLLAMA_NOT_RUNNING_MESSAGE) from exc
         raise LLMError(f"模型调用失败：{type(exc).__name__}: {exc}") from exc
 
     if response.status_code < 200 or response.status_code >= 300:

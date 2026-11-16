@@ -51,6 +51,41 @@ def test_unconfigured_raises_readable_error():
     assert "MAPSMITH_LLM_API_KEY" in message
 
 
+def test_default_settings_point_to_local_ollama():
+    """T25：未配置任何环境变量时默认走本机 Ollama。"""
+    default = Settings()
+    assert default.llm_provider == "ollama"
+    assert "11434" in (default.llm_base_url or "")
+    assert default.llm_model == "qwen2.5:3b"
+    assert default.llm_configured is True
+
+
+def test_ollama_connection_error_has_readable_hint(monkeypatch):
+    def boom(*args, **kwargs):
+        raise requests.ConnectionError("connection refused")
+
+    monkeypatch.setattr(requests, "post", boom)
+
+    with pytest.raises(llm.LLMError) as excinfo:
+        llm.chat_json("system", {}, timeout=5, settings=Settings())
+
+    message = str(excinfo.value)
+    assert "本地模型未启动" in message
+    assert "ollama serve" in message
+
+
+def test_external_api_error_keeps_generic_message(monkeypatch):
+    def boom(*args, **kwargs):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(requests, "post", boom)
+
+    with pytest.raises(llm.LLMError) as excinfo:
+        llm.chat_json("system", {}, timeout=5, settings=settings())
+
+    assert "模型调用失败" in str(excinfo.value)
+
+
 def test_request_is_built_as_openai_compatible(monkeypatch):
     captured: dict = {}
 

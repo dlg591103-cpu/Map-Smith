@@ -181,6 +181,24 @@ def test_analyze_overlay_requires_other() -> None:
 # ---- T14 join ----
 
 
+def test_join_reads_rows_from_table_field() -> None:
+    """T14 契约缺口：数据行挂在 DataLayer.table 上时 join 必须可用（gdf 为 None）。"""
+    table = DataLayer(
+        kind="table",
+        name="统计表",
+        source="测试",
+        summary="",
+        gdf=None,
+        table=pd.DataFrame([{"adcode": "320301", "PM2_5_24h": 88.0}]),
+    )
+    boundary = _admin_layer(["320301"], [box(116.0, 34.0, 117.0, 34.5)])
+
+    out = join_table(table, boundary, "adcode")
+
+    assert out.meta["matched_count"] == 1
+    assert out.gdf["PM2_5_24h"].iloc[0] == 88.0
+
+
 def test_join_attaches_stats_to_boundary() -> None:
     table = _table_layer_with_rows(
         [{"adcode": "320301", "PM2_5_24h": 88.0}, {"adcode": "320302", "PM2_5_24h": 60.0}]
