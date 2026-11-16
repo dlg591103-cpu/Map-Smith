@@ -6,6 +6,8 @@ import importlib.util
 import zipfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_SCRIPT = ROOT / "package.py"
 
@@ -44,3 +46,23 @@ def test_missing_frontend_fails_packaging(tmp_path: Path, monkeypatch) -> None:
         assert "缺少必需文件" in str(exc)
     else:
         raise AssertionError("缺少 web/dist 时 build_zip 应失败")
+
+
+def test_partial_zip_removed_when_required_entry_missing(tmp_path: Path, monkeypatch) -> None:
+    module = _load_package_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+
+    for name in ("run.ps1", "run.sh", "Dockerfile", "docker-compose.yml"):
+        (tmp_path / name).write_text("stub", encoding="utf-8")
+    pkg = tmp_path / "src" / "mapsmith"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    dist = tmp_path / "web" / "dist"
+    dist.mkdir(parents=True)
+    # 目录存在于前置检查，但不会被写入 zip，触发后置条目校验。
+    (dist / "index.html").mkdir()
+
+    out = tmp_path / "mapsmith.zip"
+    with pytest.raises(SystemExit, match="缺少必需条目"):
+        module.build_zip(out)
+    assert not out.exists(), "后置校验失败时应删除半成品 zip"

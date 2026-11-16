@@ -55,25 +55,33 @@ def build_zip(out_path: Path) -> None:
         raise SystemExit("打包失败：仓库缺少必需文件 " + "、".join(missing))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in PACK_FILES:
-            path = ROOT / name
-            if path.exists():
-                zf.write(path, arcname=name)
+    try:
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in PACK_FILES:
+                path = ROOT / name
+                if path.exists():
+                    zf.write(path, arcname=name)
 
-        for dir_name in PACK_DIRS:
-            base = ROOT / dir_name
-            for path in sorted(base.rglob("*")):
-                if path.is_file():
-                    parts = path.relative_to(ROOT).parts
-                    if _should_skip(parts):
-                        continue
-                    zf.write(path, arcname=path.relative_to(ROOT).as_posix())
+            for dir_name in PACK_DIRS:
+                base = ROOT / dir_name
+                for path in sorted(base.rglob("*")):
+                    if path.is_file():
+                        parts = path.relative_to(ROOT).parts
+                        if _should_skip(parts):
+                            continue
+                        zf.write(path, arcname=path.relative_to(ROOT).as_posix())
 
-        names = set(zf.namelist())
-        missing = [name for name in REQUIRED_ENTRIES if name not in names]
-        if missing:
-            raise SystemExit("打包失败：zip 缺少必需条目 " + "、".join(missing))
+            names = set(zf.namelist())
+            missing = [name for name in REQUIRED_ENTRIES if name not in names]
+            if missing:
+                raise SystemExit("打包失败：zip 缺少必需条目 " + "、".join(missing))
+    except BaseException:
+        # 后置校验或写入失败时不要留下半成品 zip。
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
     size_kb = out_path.stat().st_size / 1024
     print(f"已产出 {out_path}（{size_kb:.1f} KB）")

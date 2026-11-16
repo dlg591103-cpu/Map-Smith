@@ -31,6 +31,13 @@ METHOD_LABELS = {
     "custom": "自定义",
 }
 
+# loop.py 写入 spec.notes 的审查状态前缀；图面单独成行，不混入缺失值说明。
+REVIEW_STATUS_PREFIXES = (
+    "审查未完成（超时）",
+    "审查未通过",
+    "已用完 ",
+)
+
 # 国标环境空气质量指数（AQI）六级固定色阶：优、良、轻度、中度、重度、严重。
 AQI_COLORS = ("#00E400", "#FFFF00", "#FF7E00", "#FF0000", "#8F3F97", "#7E0023")
 AQI_SCHEMES = {"aqi6", "aqi", "cn_aqi", "china_aqi", "national_aqi"}
@@ -473,7 +480,12 @@ def draw_notes(fig: Figure, spec: MapSpec, *, extra_note: str | None = None) -> 
     if spec.classification is not None:
         lines.append(f"分级方法：{classification_note(spec)}")
     if spec.notes:
-        lines.append("缺失值说明：" + "；".join(spec.notes))
+        status_notes = [n for n in spec.notes if n.startswith(REVIEW_STATUS_PREFIXES)]
+        data_notes = [n for n in spec.notes if not n.startswith(REVIEW_STATUS_PREFIXES)]
+        if data_notes:
+            lines.append("缺失值说明：" + "；".join(data_notes))
+        # 审查状态由 loop.py 写入 spec.notes，但它不是缺失值说明；单独成行，避免误读。
+        lines.extend(status_notes)
     if extra_note:
         lines.append(extra_note)
     if lines:
