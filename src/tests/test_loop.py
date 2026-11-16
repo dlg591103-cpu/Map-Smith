@@ -181,6 +181,79 @@ def test_review_timeout_falls_back_to_render():
     assert any("审查未完成（超时）" in note for note in result.notes)
 
 
+def test_timeout_writes_status_into_spec_notes_before_fallback_render():
+    rendered: list[dict] = []
+
+    def capture(spec_value):
+        rendered.append(dict(spec_value))
+        return PNG
+
+    result = run(
+        REQUEST,
+        load_fn=lambda _r: profile(),
+        map_fn=lambda _p: spec(),
+        render_fn=capture,
+        review_fn=ReviewStub([verdict(passed=True)]),
+        clock=Clock(step=10.0),
+        timeout=5.0,
+    )
+
+    assert result.status == "rendered"
+    assert result.round_no == 0
+    assert any("审查未完成（超时）" in note for note in result.spec["notes"])
+    assert any("审查未完成（超时）" in note for note in rendered[-1]["notes"])
+
+
+def test_review_timeout_rerenders_with_status_note():
+    rendered: list[dict] = []
+
+    def capture(spec_value):
+        rendered.append(dict(spec_value))
+        return PNG
+
+    def review(*args, **kwargs):
+        raise ReviewTimeoutError("审查超时：超过 0.5 秒上限")
+
+    result = run(
+        REQUEST,
+        load_fn=lambda _r: profile(),
+        map_fn=lambda _p: spec(),
+        render_fn=capture,
+        review_fn=review,
+        timeout=5.0,
+    )
+
+    assert len(rendered) == 2
+    assert any("审查未完成（超时）" in note for note in result.spec["notes"])
+    assert any("审查未完成（超时）" in note for note in rendered[-1]["notes"])
+
+
+def test_allow_render_failure_annotates_final_image():
+    rendered: list[dict] = []
+
+    def capture(spec_value):
+        rendered.append(dict(spec_value))
+        return PNG
+
+    review = ReviewStub([
+        verdict(patch={"title": "修正标题"}),
+        verdict(allow_render=True),
+    ])
+
+    result = run(
+        REQUEST,
+        load_fn=lambda _r: profile(),
+        map_fn=lambda _p: spec(),
+        render_fn=capture,
+        review_fn=review,
+    )
+
+    assert result.round_no == 2
+    assert any("审查未通过" in note for note in result.spec["notes"])
+    assert any("审查未通过" in note for note in rendered[-1]["notes"])
+    assert len(rendered) == 3
+
+
 def test_load_failure_returns_failed():
     def load(_request):
         raise FileNotFoundError("demo_data/sites/sites.csv 不存在")

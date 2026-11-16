@@ -84,6 +84,24 @@ def _first_patch(verdict: Mapping[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _append_status_note(spec: dict[str, Any], note: str) -> None:
+    """把审查状态写进 ``spec.notes``，让兜底图面也能标注（SPEC V0.1 第 7 节第 8 条）。"""
+    current = spec.get("notes")
+    if not isinstance(current, list):
+        current = [] if current is None else [str(current)]
+        spec["notes"] = current
+    if note not in current:
+        current.append(note)
+
+
+def _failed_rules(verdict: Mapping[str, Any]) -> list[str]:
+    return [
+        str(issue.get("rule"))
+        for issue in verdict.get("issues") or []
+        if isinstance(issue, Mapping) and issue.get("severity") == "fail"
+    ]
+
+
 def run(
     request: Mapping[str, Any],
     *,
@@ -165,10 +183,15 @@ def run(
     png: Path | None = None
     verdict: dict[str, Any] | None = None
     round_no = 0
+    timed_out = False
+    needs_status_rerender = False
 
     while round_no < round_cap:
         if remaining() <= 0:
-            notes.append("审查未完成（超时）：已用尽总时长。")
+            note = "审查未完成（超时）：已用尽总时长。"
+            notes.append(note)
+            _append_status_note(spec, note)
+            timed_out = True
             break
 
         round_no += 1
@@ -199,22 +222,48 @@ def run(
                 )
             )
         except ReviewTimeoutError as exc:
-            notes.append(f"审查未完成（超时）：{exc}")
+            note = f"审查未完成（超时）：{exc}"
+            notes.append(note)
+            _append_status_note(spec, note)
+            timed_out = True
+            needs_status_rerender = True
             break
 
-        if verdict.get("passed") or verdict.get("allow_render"):
+        if verdict.get("passed"):
+            break
+
+        if verdict.get("allow_render"):
+            failed = "、".join(_failed_rules(verdict))
+            note = f"审查未通过{('（' + failed + '）') if failed else ''}：按协议出图并附审查意见。"
+            notes.append(note)
+            _append_status_note(spec, note)
+            needs_status_rerender = True
             break
 
         if round_no >= deny_cap:
-            notes.append(f"已用完 {deny_cap} 轮否决，按协议出图并附审查意见。")
+            note = f"已用完 {deny_cap} 轮否决，按协议出图并附审查意见。"
+            notes.append(note)
+            _append_status_note(spec, note)
+            needs_status_rerender = True
             break
 
         patch = _first_patch(verdict)
         if patch is None:
-            notes.append("审查未通过且没有可应用的修复补丁，停止返工。")
+            note = "审查未通过且没有可应用的修复补丁，停止返工。"
+            notes.append(note)
+            _append_status_note(spec, note)
+            needs_status_rerender = True
             break
         spec = apply_spec_patch(spec, patch)
         notes.append(f"第 {round_no} 轮返工：应用 {len(patch)} 个字段修复。")
+
+    if needs_status_rerender and png is not None:
+        # 状态注记是在本轮渲染之后才写入 spec.notes 的；重渲染一次，让兜底图面
+        # 真正带上审查状态，而不是只回到接口 notes（T24 第 8 条）。
+        try:
+            png = render_fn(spec)
+        except Exception:  # noqa: BLE001 - 重渲染失败时保留已出的图
+            pass
 
     if png is None:
         try:
@@ -230,10 +279,10 @@ def run(
                 summary="兜底渲染失败",
             )
 
-    if verdict is not None and verdict.get("summary"):
+    if timed_out or round_no == 0:
+        summary = "审查未完成（超时），已按当前 spec 出图。"
+    elif verdict is not None and verdict.get("summary"):
         summary = str(verdict["summary"])
-    elif round_no == 0:
-        summary = f"审查未完成（超时），已按当前 spec 出图。"
     else:
         summary = "已出图"
 
