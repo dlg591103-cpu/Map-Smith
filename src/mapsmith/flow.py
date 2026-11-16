@@ -506,6 +506,39 @@ def _annotation_from(draft_annotation: Any, columns: Any) -> tuple[str | None, b
     return label, show
 
 
+# 一句话模式的图种兜底：用户原话明确点名动作时，不把图种决定权交给 3b 模型。
+_BUFFER_HINTS = ("缓冲区", "缓冲分析", "缓冲距离", "做缓冲")
+_OVERLAY_HINTS = ("叠加", "裁剪", "相交")
+_BUFFER_KM_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(?:公里|千米|km)", re.IGNORECASE)
+
+
+def _map_type_hint(text: str) -> tuple[str, dict[str, Any]] | None:
+    """从用户原话识别明确点名的分析动作；未点名返回 None。
+
+    这是确定性规则：用户说「缓冲区」「裁剪叠加」时，图种不应由模型自由发挥决定。
+    距离与操作优先取原话；原话未给距离时交给 `_buffer_km` 的默认值。
+    """
+    cleaned = _clean(text)
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if any(hint in cleaned for hint in _BUFFER_HINTS) or "buffer" in lowered:
+        params: dict[str, Any] = {}
+        match = _BUFFER_KM_PATTERN.search(cleaned)
+        if match:
+            params["buffer_km"] = float(match.group(1))
+        return "buffer", params
+    if (
+        any(hint in cleaned for hint in _OVERLAY_HINTS)
+        or "clip" in lowered
+        or "overlay" in lowered
+        or "intersection" in lowered
+    ):
+        op = "intersection" if ("intersection" in lowered or "相交" in cleaned) else "clip"
+        return "overlay", {"overlay_op": op}
+    return None
+
+
 def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: Mapping[str, Any]) -> MapSpec:
     """把 Cartographer 的决策与本地确定性字段合成合法 MapSpec。"""
     place = request["place"]
@@ -806,6 +839,7 @@ def _make_llm_map_fn(
     *,
     llm_callable: Callable[[str, Mapping[str, Any]], Any],
     on_stage: Callable[[str], None] | None = None,
+    user_text: str | None = None,
 ) -> Callable:
     prompt = load_prompt("cartographer")
     emit = on_stage or (lambda _stage: None)
@@ -818,6 +852,9 @@ def _make_llm_map_fn(
             "decision": loaded["decision"],
             "layer_kind": loaded["layer"].kind,
             "output_schema": {
+                "map_type": "仅当用户原话点名「缓冲区/缓冲分析」或「叠加/裁剪」时填 buffer / overlay；其余留空",
+                "buffer_km": "仅 map_type=buffer 时填缓冲距离（公里），如 5",
+                "overlay_op": "仅 map_type=overlay 时填 clip 或 intersection",
                 "title": "含区域、指标、日期与单位的图名",
                 "classification": {"method": "quantile|jenks|equal_interval|custom", "n": 5},
                 "palette": {"scheme": "YlOrRd|YlGnBu|Reds|Blues", "reverse": False},
@@ -829,6 +866,13 @@ def _make_llm_map_fn(
         draft = llm_callable(prompt, payload)
         if not isinstance(draft, Mapping):
             raise LLMError("制图师返回的不是 JSON 对象")
+        hint = _map_type_hint(user_text or "")
+        if hint is not None:
+            # 原话已点名分析动作：图种与距离/操作以原话为准，模型只负责分级与配色。
+            map_type, params = hint
+            draft = dict(draft)
+            draft["map_type"] = map_type
+            draft.update(params)
         return _compose_spec(parse.request, loaded, draft)
 
     return map_
@@ -990,7 +1034,7 @@ def run_one_sentence(
     result = loop_run(
         parse.request,
         load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit),
-        map_fn=_make_llm_map_fn(parse, llm_callable=caller, on_stage=emit),
+        map_fn=_make_llm_map_fn(parse, llm_callable=caller, on_stage=emit, user_text=text),
         render_fn=_make_render_fn(
             state,
             output_dir=output_dir or current.output_dir,

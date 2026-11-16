@@ -598,3 +598,42 @@ def test_buffer_legend_title_includes_radius_and_sites() -> None:
     assert "缓冲距离 5 km" in title
     assert "面含站点" in title
     plt.close("all")
+
+
+def test_map_type_hint_reads_buffer_distance_from_text() -> None:
+    assert flow._map_type_hint("用徐州 2026-11-01 的 PM2.5 做 5 公里缓冲区分析") == (
+        "buffer",
+        {"buffer_km": 5.0},
+    )
+    assert flow._map_type_hint("做 3.5km 缓冲区") == ("buffer", {"buffer_km": 3.5})
+    assert flow._map_type_hint("画徐州点图") is None
+
+
+def test_map_type_hint_reads_overlay_operation() -> None:
+    assert flow._map_type_hint("做裁剪叠加分析") == ("overlay", {"overlay_op": "clip"})
+    assert flow._map_type_hint("做 intersection 相交分析") == (
+        "overlay",
+        {"overlay_op": "intersection"},
+    )
+
+
+def test_llm_map_fn_overrides_map_type_by_user_text() -> None:
+    """原话点名缓冲时，即使模型输出 point，也要按 buffer 出图。"""
+
+    def fake_llm(_prompt, _payload):
+        return {
+            "map_type": "point",
+            "classification": {"method": "quantile", "n": 2},
+            "palette": {"scheme": "YlOrRd"},
+        }
+
+    loaded = make_loaded()
+    map_fn = flow._make_llm_map_fn(
+        flow.RequestParse(request()),
+        llm_callable=fake_llm,
+        user_text="用徐州 2026-11-01 的 PM2.5 做 5 公里缓冲区分析",
+    )
+    spec = map_fn(loaded)
+
+    assert spec.map_type == "buffer"
+    assert loaded["analysis_layer"].kind == "buffer"
