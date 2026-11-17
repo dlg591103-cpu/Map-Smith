@@ -194,7 +194,16 @@ def draw_legend(
     if note:
         title = f"{title}\n{note}"
     if anchor is not None:
-        ax.legend(handles=patches, loc="upper left", bbox_to_anchor=anchor, title=title)
+        # 锚点在轴框外（>1）时，把图例左上角贴到锚点、向右排布在框外；
+        # 锚点落在轴框内时，必须用右上角对齐，否则图例会向右越出图框被裁。
+        loc = "upper left" if anchor[0] > 1.0 else "upper right"
+        ax.legend(
+            handles=patches,
+            loc=loc,
+            bbox_to_anchor=anchor,
+            title=title,
+            framealpha=0.92,
+        )
         return
     ax.legend(handles=patches, loc="lower right", title=title)
 
@@ -379,10 +388,10 @@ _DEFAULT_NORTH_ARROW_CANDIDATES: list[tuple[float, float, float, float, float]] 
 ]
 
 _POINT_NORTH_ARROW_CANDIDATES: list[tuple[float, float, float, float, float]] = [
-    # 点图的图例在框外，数据点可能铺满图幅，故指北针一律候选框外位置：
-    # 左侧框外 → 右侧框外。坐标超出 [0,1] 即落在 axes 之外。
-    (-0.12, 0.76, 0.86, -0.12, 0.875),
-    (1.02, 0.76, 0.86, 1.02, 0.875),
+    # 点图的图例已改叠加在图内右侧空白角，指北针相应放在图内左上角
+    # （这类行政图左上通常是无人站点的行政区面）；右上作为备选。
+    (0.06, 0.76, 0.86, 0.06, 0.875),
+    (0.94, 0.04, 0.14, 0.94, 0.155),
 ]
 
 
@@ -516,6 +525,7 @@ def apply_layout(
     extra_note: str | None = None,
     legend_note: str | None = None,
     north_arrow_candidates: list[tuple[float, float, float, float, float]] | None = None,
+    class_legend: bool = True,
 ) -> LayoutReport:
     """按 spec.layout 的标志补齐版式要素，并加载中文字体。
 
@@ -525,6 +535,8 @@ def apply_layout(
     - `extra_note` 是渲染层补充说明，追加进底部注记，不改变 spec.notes 语义。
     - `legend_note` 是图例副标题，用于 buffer 图注明半径与参与站点数。
     - `north_arrow_candidates` 透传给 ``draw_north_arrow``，控制指北针候选位置与避让。
+    - `class_legend=False` 时不画分级断点图例：点图/气泡图已用气泡大小表达数值，
+      再叠一个颜色分级图例会与大小图例语义重复、分档不一致。
     """
     font = load_chinese_font()
     report = LayoutReport(font=font)
@@ -532,7 +544,7 @@ def apply_layout(
     draw_title(ax, spec)
     report.drawn.append("图名")
 
-    if spec.layout.legend and spec.classification is not None:
+    if spec.layout.legend and spec.classification is not None and class_legend:
         draw_legend(ax, spec, unit=unit, anchor=legend_anchor, note=legend_note)
         report.drawn.append("图例")
 

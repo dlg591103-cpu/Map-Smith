@@ -297,6 +297,13 @@ def load_air(
             text = _download(QUOTSOFT_SITES_URL.format(date=day_text), timeout)
             air = pd.read_csv(text_io.StringIO(text))
             data_source = f"quotsoft china_sites_{day_text}.csv"
+            # 落盘缓存：同一日期下次即使断网也能直接用（现场演示只需联网一次）。
+            # 写盘失败不影响本次出图，只是下次仍需联网。
+            try:
+                local.parent.mkdir(parents=True, exist_ok=True)
+                local.write_text(text, encoding="utf-8")
+            except OSError:
+                pass
         else:
             raise DataError(
                 f"没有 {day_text} 的离线空气质量数据，且已禁用联网；"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { confirmCrs as confirmCrsApi, streamPost, uploadFile } from '../api'
 import type { CrsRequired, Message, ResultPayload, UploadInfo } from '../types'
 import Composer from './Composer.vue'
@@ -28,7 +28,9 @@ function newId(): string {
 }
 
 function addMessage(role: Message['role'], text: string): Message {
-  const message: Message = { id: newId(), role, text }
+  // 用 reactive 包装：SSE 回调里会通过返回的引用改 stage/result/error，
+  // 若存原始对象，Vue 3 追踪不到后续属性变更，气泡会一直空白。
+  const message = reactive<Message>({ id: newId(), role, text })
   messages.value.push(message)
   return message
 }

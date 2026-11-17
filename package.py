@@ -18,6 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 # 打进的顶层条目：src/ 目录 + 前端构建产物 + 根目录的运行/打包文件。
+# .env.example 是 LLM 配置模板（占位符，不含真实 key），随 zip 分发；
+# .env 本身在 .gitignore 中，不入库、不进 zip。
 PACK_FILES = [
     "run.ps1",
     "run.sh",
@@ -25,6 +27,7 @@ PACK_FILES = [
     "docker-compose.yml",
     "package.py",
     "README.md",
+    ".env.example",
 ]
 
 # 顶层目录：整个 src/（demo_data 在 src/mapsmith/demo_data/ 内，随 src 一并进入）；

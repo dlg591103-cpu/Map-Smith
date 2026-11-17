@@ -197,6 +197,7 @@ def test_render_reprojects_degrees_to_meters() -> None:
 
 
 def test_render_break_legend_matches_classification() -> None:
+    """点图保留颜色分级图例：点按分级着色，必须有图例解释颜色（对应规范 R02）。"""
     spec = make_point_spec()
     render_point(spec, make_point_gdf([30, 45, 55, 65, 80]))
     ax = plt.gcf().axes[0]
@@ -254,8 +255,12 @@ def test_render_unimplemented_map_type_raises() -> None:
     plt.close("all")
 
 
-def test_render_legends_outside_axes_and_north_arrow_visible() -> None:
-    """回归防护：图例必须在图框外；指北针也在图框外，且不与图例/气泡重叠。"""
+def test_render_legends_and_north_arrow_inside_frame() -> None:
+    """回归防护：图例与指北针叠加在图内角落，必须完整落在图框内（不被裁）。
+
+    改版背景：早先把图例/指北针放图框外，导致画幅被迫让位、地图缩到 60% 宽，
+    且框外图例会被 bbox_inches="tight" 裁掉。现改为叠加在图内空白角落。
+    """
     render_point(make_point_spec(), make_point_gdf([30, 45, 55, 65, 80]))
     fig = plt.gcf()
     fig.canvas.draw()
@@ -266,13 +271,14 @@ def test_render_legends_outside_axes_and_north_arrow_visible() -> None:
     legends = _legends(ax)
     assert len(legends) == 2
     for legend in legends:
-        assert not legend.get_window_extent(renderer).overlaps(ax_box)
+        box = legend.get_window_extent(renderer)
+        assert ax_box.padded(3).contains(box.x0, box.y0), "图例左/下边越出图框"
+        assert ax_box.padded(3).contains(box.x1, box.y1), "图例右/上边越出图框"
 
     n_texts = [t for t in ax.texts if t.get_text() == "N"]
     assert n_texts
     n_box = n_texts[0].get_window_extent(renderer)
-    assert not n_box.overlaps(ax_box)
-    assert n_box.x1 <= ax_box.x0  # 图框左侧外，远离右侧图例
+    assert ax_box.contains(n_box.x0, n_box.y0) and ax_box.contains(n_box.x1, n_box.y1)
     plt.close("all")
 
 
