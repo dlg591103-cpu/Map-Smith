@@ -253,7 +253,13 @@ button { cursor: pointer; }
 }
 
 .result img {
-  width: 100%;
+  /* 横长地图按宽度铺满；高度上限按「视口减去顶栏/状态栏/气泡/输入框」估算，
+     保证任何比例的图都能完整显示，不用滚动也不会被容器裁掉。 */
+  max-width: 100%;
+  max-height: calc(100vh - 320px);
+  width: auto;
+  height: auto;
+  margin: 0 auto;
   border-radius: 10px;
   display: block;
 }
