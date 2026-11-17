@@ -1,12 +1,14 @@
-"""T19 审图员规则库的补丁护栏：fix_spec_patch 不得把模板占位符写进 spec。
+"""T19 审图员规则库的补丁护栏：fix_spec_patch 不得含模板占位符。
 
-来源：T24 端到端验收发现的真实缺陷。R01 的 fix_spec_patch 是
+来源：T24 端到端验收发现的真实缺陷。R01 的 fix_spec_patch 曾是
 ``{"title": "<区域><指标><时间>图"}``，返工时该字符串被原样写入 spec.title，
 第 2 轮渲染出的图上直接印着占位符 —— 返工流程反而把图改坏了。
 
-本用例只做护栏，不修规则库：kb/reviewer_rules.json 的归属是审图员窗口。
-规则库未修正前，R01/R05/R10 的既有问题由 ``test_known_placeholder_rules_are_tracked``
-显式登记，修正后该用例应连同登记一起删除。
+修复历程：
+- T25 先在 `apply_spec_patch` 里过滤 ``<...>``，占位符不再进入 spec；
+- 2026-11-17 把 R01/R05/R10 的 fix_spec_patch 置为 null —— 这三条的修复内容
+  依赖实际区域/指标/日期/来源/缺测数，静态模板给不出正确值。置 null 后 loop
+  检测到无可用补丁会「停止返工 + 写明原因 + 重渲染」，比空转更诚实。
 """
 
 from __future__ import annotations
@@ -20,9 +22,6 @@ import pytest
 from mapsmith.agents.reviewer import apply_spec_patch
 
 RULES_PATH = Path(__file__).resolve().parents[1] / "mapsmith" / "kb" / "reviewer_rules.json"
-
-# 已登记、尚未修正的规则（T19 归属）。修正后从该集合移除。
-KNOWN_PLACEHOLDER_RULES = {"R01", "R05", "R10"}
 
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
 
@@ -42,13 +41,23 @@ def placeholder_rules() -> set[str]:
     return found
 
 
-def test_placeholder_rules_match_known_registry() -> None:
-    """残留的占位符规则必须与登记表一致：修正了就要从表里删掉，不能悄悄消失。"""
-    assert placeholder_rules() == KNOWN_PLACEHOLDER_RULES, (
-        "规则库的占位符补丁与登记表不一致："
-        f"实际 {sorted(placeholder_rules())}，登记 {sorted(KNOWN_PLACEHOLDER_RULES)}。"
-        "若已修正请同步移除登记；若新增了占位符，请先修规则库而非扩展登记表。"
+def test_no_placeholder_rules() -> None:
+    """规则库中不得残留任何占位符补丁（2026-11-17 已全部修正）。"""
+    assert placeholder_rules() == set(), (
+        f"规则库仍有占位符补丁：{sorted(placeholder_rules())}。"
+        "需要实际上下文的规则（图名/来源/缺测说明）应把 fix_spec_patch 置为 null，"
+        "由 loop 停止返工并写明原因，而不是写静态模板。"
     )
+
+
+def test_context_dependent_rules_have_no_patch() -> None:
+    """R01/R05/R10 依赖实际内容，必须没有静态补丁（否则返工空转或污染 spec）。"""
+    for rule_id in ("R01", "R05", "R10"):
+        rule = next(r for r in load_rules() if r.get("id") == rule_id)
+        assert rule.get("fix_spec_patch") in (None, {}), (
+            f"{rule_id} 的 fix_spec_patch 应为 null（需要实际上下文），实际为 "
+            f"{rule.get('fix_spec_patch')!r}"
+        )
 
 
 def test_apply_spec_patch_skips_placeholder() -> None:

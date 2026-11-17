@@ -10,9 +10,7 @@
       "severity": "fail",
       "category": "title",
       "fix_hint": "title 必须同时出现行政区名称或 extent 区域标识、指标名称与日期；缺 title/extent/layout 直接判 fail。",
-      "fix_spec_patch": {
-        "title": "<区域><指标><时间>图"
-      }
+      "fix_spec_patch": null
     },
     {
       "id": "R02",
@@ -51,9 +49,7 @@
       "severity": "fail",
       "category": "source",
       "fix_hint": "data_source_note 非空，且包含来源与 YYYY-MM-DD 形式的更新日期。",
-      "fix_spec_patch": {
-        "data_source_note": "数据来源：<来源名称>；更新时间：<YYYY-MM-DD>"
-      }
+      "fix_spec_patch": null
     },
     {
       "id": "R06",
@@ -93,7 +89,10 @@
       "category": "font",
       "fix_hint": "font.sans_serif 含 Microsoft YaHei 或 SimHei，unicode_minus 为 false。",
       "fix_spec_patch": {
-        "font.sans_serif": ["Microsoft YaHei", "SimHei"],
+        "font.sans_serif": [
+          "Microsoft YaHei",
+          "SimHei"
+        ],
         "font.unicode_minus": false
       }
     },
@@ -103,9 +102,7 @@
       "severity": "fail",
       "category": "missing",
       "fix_hint": "field 存在 NaN 时，notes 必须说明缺失/缺测/插补策略。",
-      "fix_spec_patch": {
-        "notes": ["<X> 个站点缺测，按<方法>插补"]
-      }
+      "fix_spec_patch": null
     }
   ]
 }
