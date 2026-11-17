@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 import uuid
@@ -101,6 +102,17 @@ _TIME_PATTERNS = (
     re.compile(r"^(\d{4})(\d{2})(\d{2})$"),
     re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日"),
 )
+
+
+def _allow_online() -> bool:
+    """是否允许联网取数。默认关闭（离线优先，演示稳定）。
+
+    设环境变量 ``MAPSMITH_ALLOW_ONLINE=1`` 时开启：本地 ``demo_data/`` 找不到
+    对应日期或边界时，才回落到 quotsoft / DataV 在线下载；联网失败仍抛出明确
+    错误（不伪造数据），不影响已缓存的离线日期。
+    """
+    raw = os.environ.get("MAPSMITH_ALLOW_ONLINE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -306,7 +318,7 @@ def _load_overlay_base(place: str) -> DataLayer | None:
     if not _clean(place):
         return None
     try:
-        return load_admin(place, online=False)
+        return load_admin(place, online=_allow_online())
     except DataError:
         return None
 
@@ -320,7 +332,7 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
         layer = parse_upload(upload.path, crs=upload.confirmed_crs)
         layer = ensure_crs(layer, confirmed_crs=upload.confirmed_crs)
         if layer.kind == "point":
-            admin = load_admin(place, online=False)
+            admin = load_admin(place, online=_allow_online())
             profile = profile_points(layer, field_name=field_name, study_area=admin)
             return {
                 "summary": profile.summary,
@@ -352,7 +364,7 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
             }
         raise DataError("统计表需要关联行政区后才能成图；请先转成点位或面图层再上传")
 
-    admin, points = resolve_inputs(place, date, field_name, online=False)
+    admin, points = resolve_inputs(place, date, field_name, online=_allow_online())
     profile = profile_points(points, field_name=field_name, study_area=admin)
     return {
         "summary": profile.summary,
