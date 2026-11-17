@@ -95,17 +95,23 @@ def _make_clustered_gdf(labels: list[str] | None = None) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(data, geometry=[Point(x, y) for x, y in zip(xs, ys)], crs="EPSG:4326")
 
 
-def test_point_content_occupies_at_least_half_frame() -> None:
-    """验收 1：站点集中时，站点外接框占图幅宽度比例 ≥ 50%（修复前约 10%）。"""
+def test_point_frame_uses_full_admin_extent() -> None:
+    """点图取景用完整行政区范围，保证底图区县完整（不再按站点分布收窄）。
+
+    改版背景：早期按站点收窄取景，底图只剩城区几个区，观感像「底图不全」。
+    现改为完整行政区底图 + 气泡按视野放大，故这里断言取景宽度≈行政区宽度。
+    """
     spec = make_spec()
     gdf = _make_clustered_gdf()
     render_point(spec, gdf)
     ax = plt.gcf().axes[0]
     xmin, xmax = ax.get_xlim()
     frame_w = xmax - xmin
-    content_w = float(gdf.total_bounds[2] - gdf.total_bounds[0])
-    ratio = content_w / frame_w
-    assert ratio >= 0.5, f"站点外接框占图幅宽度比例 {ratio:.2%}，应 ≥ 50%"
+    extent_w = spec.extent.bbox[2] - spec.extent.bbox[0]
+    # 画幅比例微调可能带来几个百分点差异，允许 5%
+    assert abs(frame_w - extent_w) / extent_w < 0.05, (
+        f"取景宽 {frame_w:.4f} 与行政区宽 {extent_w:.4f} 相差过大，底图会不完整"
+    )
     plt.close("all")
 
 

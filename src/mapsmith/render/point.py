@@ -27,8 +27,7 @@ from matplotlib.lines import Line2D
 
 from ..io.models import DataError
 from ..spec import MapSpec
-from .choropleth import _aspect_for, _transformed_extent, class_index
-from .extent import drawing_extent
+from .choropleth import MISSING_COLOR, _aspect_for, _transformed_extent, class_index
 from .fonts import load_chinese_font
 from .layout import (
     _POINT_NORTH_ARROW_CANDIDATES,
@@ -173,6 +172,68 @@ def _fmt(value: float) -> str:
     if float(value) == int(value):
         return str(int(value))
     return f"{value:g}"
+
+
+def _is_crowded(frame: Any, view_width: float) -> bool:
+    """站点在视野内是否过密：任意两站最小间距 < 视野宽度的 2%。
+
+    2% 约等于「两个气泡在图幅上必然互相重叠」的尺度。过密时继续画气泡会糊成
+    一团，改用底图面域聚合表达数值。
+    """
+    if frame is None or len(frame) < 2 or view_width <= 0:
+        return False
+    try:
+        xs = np.asarray(frame.geometry.x, dtype=float)
+        ys = np.asarray(frame.geometry.y, dtype=float)
+    except Exception:  # noqa: BLE001 - 几何缺失时按不拥挤处理
+        return False
+    min_d = float("inf")
+    n = len(xs)
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = math.hypot(xs[i] - xs[j], ys[i] - ys[j])
+            if d < min_d:
+                min_d = d
+    return min_d / view_width < 0.02
+
+
+def _draw_aggregated_background(
+    ax: Any, spec: MapSpec, points: Any, background: Any, field: str
+) -> bool:
+    """站点过密时：把站点值按行政区聚合，给底图分级着色。成功返回 True。
+
+    聚合口径为「区县内站点该字段的算术平均」（缺测不参与）；无站点的区县用
+    `MISSING_COLOR`。站点位置另以小号空心圆标注，保留真实空间位置。
+    """
+    classification = spec.classification
+    if classification is None or not classification.breaks:
+        return False
+    try:
+        import geopandas as gpd  # 局部导入：只有拥挤分支用得到
+        import pandas as pd
+    except ImportError:  # pragma: no cover - 运行环境已锁依赖
+        return False
+
+    try:
+        admin = background.copy()
+        joined = gpd.sjoin(points, admin[["geometry"]], how="inner", predicate="within")
+    except Exception:  # noqa: BLE001 - 空间关联失败则退回普通底图
+        return False
+    if joined is None or len(joined) == 0:
+        return False
+
+    agg = joined.groupby("index_right")[field].mean()
+    admin["_agg_value"] = agg.reindex(admin.index)
+    if int(admin["_agg_value"].notna().sum()) < 2:
+        return False
+
+    palette = palette_colors(spec, classification.n)
+    colors = []
+    for value in admin["_agg_value"]:
+        idx = None if pd.isna(value) else class_index(value, classification.breaks)
+        colors.append(MISSING_COLOR if idx is None else palette[idx])
+    admin.plot(ax=ax, color=colors, edgecolor="#8f9aa6", linewidth=0.6, zorder=0)
+    return True
 
 
 def size_map(value: float, vmin: float, vmax: float) -> float:
@@ -338,9 +399,56 @@ def render_point(
     size_result = assign_sizes(values)
     color_list, class_counts = _point_colors(values, size_result.missing_mask, spec)
 
+    # --- 取景与画布版式 ---
+    # 点图要表达「站点在行政区中的位置」，因此取景用完整行政区范围
+    # （spec.extent.bbox），底图 10 个区县全显示；不再按站点分布收窄——收窄会让
+    # 底图只剩城区几个区，观感上像「底图不全」。
+    # 画幅固定用 spec.layout.size（默认 10x8，横长），与网页卡片比例接近。
+    content_bounds = None if frame.empty else tuple(float(v) for v in frame.total_bounds)
+    aspect = _aspect_for(spec.crs, spec.extent.bbox)
+    eminx, eminy, emaxx, emaxy = _transformed_extent(spec)
+    minx, miny, maxx, maxy = eminx, eminy, emaxx, emaxy
+
+    # 边距（英寸）：图例与指北针叠加在图内空白角落，左右只留很小出图边距。
+    left_pad, right_pad = 0.18, 0.18
+    top_pad, bottom_pad = 0.45, 1.15
+    fig_w, fig_h = spec.layout.size
+    ax_w_in = max(fig_w - left_pad - right_pad, 2.0)
+    ax_h_in = max(fig_h - top_pad - bottom_pad, 2.0)
+    target_ratio = ax_w_in / ax_h_in  # 轴框像素宽高比 = 取景像素宽高比的目标
+
+    eminx, eminy, emaxx, emaxy = _transformed_extent(spec)
+    dw = maxx - minx
+    dh = maxy - miny
+    if dw > 0 and dh > 0:
+        cur_ratio = dw / (dh * aspect)
+        if cur_ratio < target_ratio:
+            # 取景偏竖：横向扩展（受 extent 约束，不会画出图幅之外）
+            need = target_ratio * dh * aspect
+            extra = (need - dw) / 2.0
+            minx = max(minx - extra, eminx)
+            maxx = min(maxx + extra, emaxx)
+        elif cur_ratio > target_ratio:
+            # 取景偏扁：纵向扩展
+            need = dw / (target_ratio * aspect)
+            extra = (need - dh) / 2.0
+            miny = max(miny - extra, eminy)
+            maxy = min(maxy + extra, emaxy)
+
     # --- 画点 ---
-    fig, ax = plt.subplots(figsize=spec.layout.size)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    # 轴框按英寸比例精确落位，且不用 bbox_inches="tight"（它会把标题与框外图例裁掉）。
+    fig.subplots_adjust(
+        left=left_pad / fig_w,
+        right=(left_pad + ax_w_in) / fig_w,
+        bottom=bottom_pad / fig_h,
+        top=(bottom_pad + ax_h_in) / fig_h,
+    )
     background_drawn = False
+    # 站点在视野里过于密集时，气泡会叠成一团、读不出内容。此时改为「底图按站点
+    # 聚合值分级着色 + 站点以小空心圆标位置」，既保留点图的真实位置，又能读出数值。
+    crowded = _is_crowded(frame, maxx - minx)
+    aggregated = False
     if background_gdf is not None and getattr(background_gdf, "empty", True) is False:
         if getattr(background_gdf, "crs", None) is not None:
             background = (
@@ -348,13 +456,16 @@ def render_point(
                 if str(background_gdf.crs) != str(spec.crs)
                 else background_gdf
             )
-            background.plot(
-                ax=ax,
-                facecolor="#e9eef4",
-                edgecolor="#b9c3cf",
-                linewidth=0.7,
-                zorder=0,
-            )
+            if crowded:
+                aggregated = _draw_aggregated_background(ax, spec, frame, background, field)
+            if not aggregated:
+                background.plot(
+                    ax=ax,
+                    facecolor="#e9eef4",
+                    edgecolor="#b9c3cf",
+                    linewidth=0.7,
+                    zorder=0,
+                )
             background_drawn = True
     x = np.asarray(frame.geometry.x, dtype=float)
     y = np.asarray(frame.geometry.y, dtype=float)
@@ -362,83 +473,123 @@ def render_point(
     valid_arr = ~missing_arr
     sizes_arr = np.asarray(size_result.sizes, dtype=float)
 
-    if valid_arr.any():
-        ax.scatter(
-            x[valid_arr],
-            y[valid_arr],
-            s=sizes_arr[valid_arr],
-            c=np.asarray(color_list)[valid_arr],
-            edgecolors=EDGE_COLOR,
-            linewidths=0.6,
-            zorder=3,
-        )
-    if missing_arr.any():
-        ax.scatter(
-            x[missing_arr],
-            y[missing_arr],
-            s=sizes_arr[missing_arr],
-            facecolors="none",
-            edgecolors=MISSING_EDGE,
-            linewidths=1.0,
-            zorder=3,
-        )
+    # 视野比站点分布大得多时放大气泡：完整行政区（2.3°）对照城区站点（0.3°）时，
+    # 原始尺寸会让站点缩成小点。按面积开方缩放（≈半径线性），上限 3 倍。
+    size_scale = 1.0
+    if content_bounds is not None:
+        content_w = float(content_bounds[2] - content_bounds[0])
+        view_w = maxx - minx
+        if content_w > 0 and view_w > 0:
+            size_scale = min(max((view_w / content_w) ** 0.5, 1.0), 3.0)
+    display_sizes = sizes_arr * size_scale
 
-    ax.set_aspect(_aspect_for(spec.crs, spec.extent.bbox))
+    if aggregated:
+        # 拥挤模式：数值已由底图面域表达，站点只画小号空心圆定位，避免叠成一团。
+        ax.scatter(
+            x,
+            y,
+            s=40.0,
+            facecolors="none",
+            edgecolors="#333333",
+            linewidths=1.1,
+            zorder=4,
+        )
+    else:
+        if valid_arr.any():
+            ax.scatter(
+                x[valid_arr],
+                y[valid_arr],
+                s=display_sizes[valid_arr],
+                c=np.asarray(color_list)[valid_arr],
+                edgecolors=EDGE_COLOR,
+                linewidths=0.6,
+                zorder=3,
+            )
+        if missing_arr.any():
+            ax.scatter(
+                x[missing_arr],
+                y[missing_arr],
+                s=display_sizes[missing_arr],
+                facecolors="none",
+                edgecolors=MISSING_EDGE,
+                linewidths=1.0,
+                zorder=3,
+            )
+
+    ax.set_aspect(aspect)
     ax.set_axis_off()
-    # 取景范围按站点实际分布收窄，避免稀疏站点挤在行政区全幅正中的一小团。
-    content_bounds = None if frame.empty else tuple(float(v) for v in frame.total_bounds)
-    minx, miny, maxx, maxy = drawing_extent(spec, content_bounds=content_bounds)
+    # 取景范围已在创建 figure 前算好（完整行政区），这里直接应用。
     ax.set_xlim(minx, maxx)
     ax.set_ylim(miny, maxy)
 
-    # 取景范围明显小于 extent 时，注记说明站点只覆盖局部（渲染层补充说明，不改 spec.notes）。
+    # 站点只覆盖视野一小部分时，在图外说明覆盖范围（渲染层补充，不改 spec.notes）。
     extra_note: str | None = None
-    extent_full = _transformed_extent(spec)
-    extent_w = extent_full[2] - extent_full[0]
     draw_w = maxx - minx
-    if extent_w > 0 and draw_w < extent_w * 0.3:
-        draw_m = metric_extent((minx, miny, maxx, maxy), source_crs=str(spec.crs))
-        km = (draw_m[2] - draw_m[0]) / 1000.0
-        extra_note = f"注记：站点仅覆盖图幅局部，范围约 {km:g} km"
+    if content_bounds is not None and draw_w > 0:
+        content_w = float(content_bounds[2] - content_bounds[0])
+        if content_w / draw_w < 0.5:
+            content_m = metric_extent(
+                tuple(content_bounds), source_crs=str(spec.crs)  # type: ignore[arg-type]
+            )
+            km = (content_m[2] - content_m[0]) / 1000.0
+            extra_note = f"注记：站点仅覆盖图幅局部，分布范围约 {km:g} km"
+    if aggregated:
+        agg_note = "站点较密，数值已按区县聚合为面域分级；空心圆为监测站位置"
+        if extra_note:
+            extra_note = "注记：" + extra_note.replace("注记：", "") + "；" + agg_note
+        else:
+            extra_note = "注记：" + agg_note
 
     # --- 标注 ---
     if label_field is not None and spec.annotation.show:
-        _place_labels(fig, ax, x, y, frame[label_field].astype(str).tolist(), sizes_arr)
+        _place_labels(fig, ax, x, y, frame[label_field].astype(str).tolist(), display_sizes)
 
     # --- 气泡大小三级图例（先画并 add_artist，让 apply_layout 的断点图例成为主图例）---
+    # 分档口径与颜色分级图例对齐：取 classification 断点的下界/中值/上界，
+    # 避免「断裂点 47.6-58」与「气泡 45/51.5/58」两套数字并存造成误读。
     if (
-        spec.layout.legend
+        not aggregated  # 聚合模式下站点是固定大小定位标记，没有大小映射，不画大小图例
+        and spec.layout.legend
         and size_result.vmin is not None
         and size_result.vmax is not None
         and size_result.vmin != size_result.vmax
     ):
-        mid = (size_result.vmin + size_result.vmax) / 2.0
-        level_values = (size_result.vmin, mid, size_result.vmax)
+        breaks = [b for b in (spec.classification.breaks if spec.classification else []) if b is not None]
+        if len(breaks) >= 3:
+            level_values = (breaks[0], breaks[len(breaks) // 2], breaks[-1])
+        else:
+            mid = (size_result.vmin + size_result.vmax) / 2.0
+            level_values = (size_result.vmin, mid, size_result.vmax)
         handles = [
             _size_handle(size_map(v, size_result.vmin, size_result.vmax)) for v in level_values
         ]
         labels = [_fmt(v) for v in level_values]
         title = "气泡大小" + (f"（{unit}）" if unit else "")
-        # 气泡大小图例也放图框外右侧、断点图例下方，避免压住右下角的气泡点。
+        # 图例叠加在图内右侧空白处（徐州这类图右上/右中是行政面无站点区域），
+        # 不再占用图框外空间，把画幅让给地图本身。
         size_legend = ax.legend(
             handles=handles,
             labels=labels,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 0.4),
+            loc="upper right",
+            bbox_to_anchor=(0.965, 0.66),
             title=title,
+            framealpha=0.92,
         )
         ax.add_artist(size_legend)
 
     # --- 版式要素 + 断点图例 ---
-    # 点图图例在框外，数据点可能铺满图幅；指北针按框外左右候选依次避让。
+    # 图例与指北针都叠加在图内空白角落，画幅全部让给地图。
     layout = apply_layout(
         fig,
         ax,
         spec,
         unit=unit,
-        legend_anchor=(1.02, 1.0),
+        legend_anchor=(0.965, 0.96),
         north_arrow_candidates=_POINT_NORTH_ARROW_CANDIDATES,
         extra_note=extra_note,
+        # 保留颜色分级图例：点仍按分级着色，没有图例解释颜色会让读者看不懂；
+        # 与气泡大小图例并存（口径已在上方对齐到同一组断点）。
+        class_legend=True,
     )
 
     # 版式注记下移到图框正下方（与 choropleth 一致的留白处理）。
@@ -448,10 +599,12 @@ def render_point(
         text.set_va("top")
         text.set_y(ax_bottom - 0.02)
 
+    # 版式已在 subplots_adjust 里留好空间，直接按 figure 尺寸出图，
+    # 不用 bbox_inches="tight"：实测它会把标题与右侧图例一起裁掉。
     if out_path is not None:
-        fig.savefig(out_path, dpi=spec.layout.dpi, bbox_inches="tight")
+        fig.savefig(out_path, dpi=spec.layout.dpi)
     if pdf_path is not None:
-        fig.savefig(pdf_path, dpi=spec.layout.dpi, bbox_inches="tight")
+        fig.savefig(pdf_path, dpi=spec.layout.dpi)
 
     drawn = len(values) - size_result.missing_count
     summary = (
