@@ -32,7 +32,8 @@ def render(spec: MapSpec, gdf: Any, **kwargs: Any) -> Any:
     if spec.map_type == "idw":
         from .idw import render_idw
 
-        kwargs.pop("background_gdf", None)
+        # 行政面交给 idw 做「凸包 ∩ 行政界」裁剪与浅灰底图；丢掉它会得到一块
+        # 与行政区形状无关的倾斜色块（站点凸包只在站点密集区）。
         return render_idw(spec, gdf, **kwargs)
     raise NotImplementedError(
         f"图种 {spec.map_type!r} 的渲染尚未实现（当前支持 choropleth / point / idw / buffer / overlay）"

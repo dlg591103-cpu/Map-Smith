@@ -1558,7 +1558,8 @@ def _make_render_fn(
         map_spec = _to_mapspec(spec)
         gdf = _render_frame(map_spec, loaded)
         kwargs: dict[str, Any] = {}
-        if map_spec.map_type == "point" and loaded.get("admin") is not None:
+        if map_spec.map_type in {"point", "idw"} and loaded.get("admin") is not None:
+            # 点图用它画底图；IDW 还用它把插值色块裁到行政界内（否则只有站点凸包）。
             kwargs["background_gdf"] = loaded["admin"].gdf
         result = run_render(map_spec, gdf, out_dir, name="web_map", **kwargs)
         state["render"] = result

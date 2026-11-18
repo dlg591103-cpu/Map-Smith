@@ -273,3 +273,49 @@ def test_render_unimplemented_map_type_still_raises() -> None:
     with pytest.raises(NotImplementedError, match="尚未实现"):
         render(bogus, make_point_gdf([30, 45, 55]))
     plt.close("all")
+
+# --- 行政界裁剪 ---
+
+
+def test_admin_mask_marks_inside_and_outside() -> None:
+    """网格点落在行政面内为 True，面外为 False。"""
+    from mapsmith.render.idw import _admin_mask
+
+    geom = box(0.0, 0.0, 2.0, 2.0)
+    gx, gy = np.meshgrid(np.linspace(-1, 3, 5), np.linspace(-1, 3, 5))
+
+    mask = _admin_mask(geom, gx, gy)
+
+    assert mask.shape == gx.shape
+    assert bool(mask[2, 2]) is True   # 中心在面内
+    assert bool(mask[0, 0]) is False  # 角点在面外
+
+
+def test_render_idw_with_background_crops_to_admin_area() -> None:
+    """给了行政面：色块裁到界内，报告里注明裁剪，着色面积小于纯凸包。"""
+    background = gpd.GeoDataFrame(
+        {"geometry": [box(116.4, 34.2, 117.0, 34.6)]}, crs="EPSG:4326"
+    )
+    gdf = make_point_gdf([30, 45, 55, 65, 80])
+
+    plain = render_idw(make_idw_spec(), gdf)
+    cropped = render_idw(make_idw_spec(), gdf, background_gdf=background)
+
+    assert cropped.hull_area_km2 < plain.hull_area_km2
+    assert "按行政界裁剪" in cropped.summary
+    assert "按行政界裁剪" not in plain.summary
+    plt.close("all")
+
+
+def test_render_dispatches_idw_with_background() -> None:
+    """总入口不再丢弃 background_gdf（丢弃会得到与行政界无关的倾斜色块）。"""
+    background = gpd.GeoDataFrame(
+        {"geometry": [box(116.4, 34.2, 117.0, 34.6)]}, crs="EPSG:4326"
+    )
+
+    report = render(
+        make_idw_spec(), make_point_gdf([30, 45, 55, 65, 80]), background_gdf=background
+    )
+
+    assert "按行政界裁剪" in report.summary
+    plt.close("all")

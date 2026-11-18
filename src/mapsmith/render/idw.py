@@ -119,6 +119,14 @@ def _point_in_polygon(x: float, y: float, polygon: np.ndarray) -> bool:
     return inside
 
 
+def _admin_mask(admin_geom: Any, grid_x: Any, grid_y: Any) -> Any:
+    """行政界掩膜：网格点是否落在行政面内（支持多面与洞）。"""
+    from shapely import contains_xy
+
+    inside = contains_xy(admin_geom, np.ravel(grid_x), np.ravel(grid_y))
+    return np.asarray(inside, dtype=bool).reshape(np.shape(grid_x))
+
+
 @dataclass
 class IDWReport:
     """一次 IDW 出图的结果，供回显与测试核对。"""
@@ -141,6 +149,7 @@ def render_idw(
     unit: str | None = None,
     out_path: str | Path | None = None,
     pdf_path: str | Path | None = None,
+    background_gdf: Any | None = None,
 ) -> IDWReport:
     """渲染一张 IDW 空间插值面图（不画坐标轴，版式要素由 `apply_layout` 补齐）。
 
@@ -148,6 +157,9 @@ def render_idw(
     - ``field`` 缺省取 spec 里 kind=idw 图层的 field。
     - IDW 在度量投影下计算，插值栅格转回输出 CRS 显示。
     - 只在站点凸包内插值，凸包外不着色。
+    - ``background_gdf`` 给定时，再与行政界求交并画浅灰底图：站点凸包常只覆盖
+      站点密集的那部分（如苏南沿江），单靠凸包会画出一块与行政区形状无关的倾斜
+      多边形；裁剪后色块落在行政界内，「无站点区域留白」的语义不变。
     - 缺测点（None / NaN）不参与插值，画灰色空心点。
     """
     if getattr(gdf, "crs", None) is None:
@@ -231,6 +243,27 @@ def render_idw(
 
     grid_z = _idw(points_meas, valid_vals, grid_x, grid_y, power=IDW_POWER)
     hull = _hull_mask(points_meas, grid_x, grid_y)
+
+    # 行政界掩膜：凸包只覆盖站点密集区，形状与行政区无关。给了行政面就裁到界内，
+    # 掩膜取「凸包 ∩ 行政界」，凸包外或省界外都不着色。
+    background_spec = None
+    if background_gdf is not None and not getattr(background_gdf, "empty", True):
+        background_spec = (
+            background_gdf.to_crs(spec.crs)
+            if str(getattr(background_gdf, "crs", "")) != str(spec.crs)
+            else background_gdf
+        )
+        admin = background_spec
+        if str(getattr(admin, "crs", "")) != str(measurement):
+            admin = admin.to_crs(measurement)
+        try:
+            admin_geom = admin.union_all()
+        except AttributeError:  # shapely < 2.0 或旧 geopandas
+            from shapely.ops import unary_union
+
+            admin_geom = unary_union(list(admin.geometry))
+        hull = hull & _admin_mask(admin_geom, grid_x, grid_y)
+
     grid_z[~hull] = np.nan
 
     hull_area_m2 = float(
@@ -249,6 +282,12 @@ def render_idw(
     minx_o, miny_o, maxx_o, maxy_o = extent_out
 
     fig, ax = plt.subplots(figsize=spec.layout.size)
+
+    if background_spec is not None:
+        # 浅灰行政底图：读者能看清色块落在行政区的哪一段，以及哪些区域没有站点。
+        background_spec.plot(
+            ax=ax, facecolor="#e9eef4", edgecolor="#c9d1da", linewidth=0.6, zorder=0
+        )
 
     # IDW 是连续插值面，用连续色阶渲染；图例用分级断点 Patch 做示意性标注。
     # AQI 用国标六级色阶（AQI6 是自定义方案名、不是 matplotlib colormap），
@@ -327,6 +366,8 @@ def render_idw(
     )
     if missing_count:
         summary += f"，缺测 {missing_count} 个站点未参与插值"
+    if background_spec is not None:
+        summary += "；色块已按行政界裁剪，界外与无站点区域留白"
 
     return IDWReport(
         layout=layout,

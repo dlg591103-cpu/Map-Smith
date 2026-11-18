@@ -6,6 +6,16 @@ async function readError(response: Response): Promise<string> {
   try {
     const body = await response.json()
     if (body && typeof body.detail === 'string') return body.detail
+    // FastAPI 的 422 校验错误 detail 是数组：[{loc, msg, type}]。
+    // 之前只认字符串，界面只能显示「请求失败（HTTP 422）」，看不到哪个字段错了。
+    if (body && Array.isArray(body.detail)) {
+      const parts = body.detail.map((item: unknown) => {
+        const entry = item as { loc?: unknown[]; msg?: string }
+        const where = Array.isArray(entry.loc) ? entry.loc.join('.') : ''
+        return `${where}: ${entry.msg || '校验失败'}`
+      })
+      if (parts.length) return parts.join('；')
+    }
     if (body && typeof body.message === 'string') return body.message
   } catch {
     // 非 JSON 错误体，回退到文本

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import re
 import threading
@@ -15,8 +16,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import flow
@@ -31,8 +33,24 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 ALLOWED_SUFFIXES = {".csv", ".geojson", ".json", ".zip"}
 ALLOWED_FILENAMES = {"web_map.png", "web_map.pdf"}
 UPLOAD_REGISTRY: dict[str, flow.UploadRecord] = {}
+_LOG = logging.getLogger("mapsmith.server")
 
 app = FastAPI(title="MapSmith", version=APP_VERSION)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """把 422 的原始请求体打到日志里。
+
+    FastAPI 默认只在响应里给 detail，前端拿不到「哪个字段错了」时很难自查；
+    这里留一条服务端日志，配合前端展示的 detail 能直接定位。
+    """
+    try:
+        raw = (await request.body())[:2000].decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 - 日志失败不能影响响应
+        raw = "<unreadable>"
+    _LOG.warning("422 on %s body=%s errors=%s", request.url.path, raw, exc.errors()[:5])
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 class ChatBody(BaseModel):
@@ -59,8 +77,10 @@ class FormBody(BaseModel):
     label_field: str | None = None
     show_label: bool = False
     upload_id: str | None = None
-    # T25：buffer / overlay 参数
-    buffer_km: str | None = None
+    # T25：buffer / overlay 参数。
+    # buffer_km 必须允许数字：前端 `<input type="number">` 会被 Vue 3 的 v-model
+    # 自动转成 number，早先只声明 str 会让「生成地图」直接 422（用户实测踩到）。
+    buffer_km: float | str | None = None
     overlay_op: str | None = None
 
 
