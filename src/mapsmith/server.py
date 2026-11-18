@@ -17,7 +17,7 @@ from typing import Any, Iterator
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import flow
 from .agents.llm import LLMError, LLMNotConfigured, configured
@@ -36,6 +36,9 @@ app = FastAPI(title="MapSmith", version=APP_VERSION)
 
 class ChatBody(BaseModel):
     message: str = ""
+    # 同一话题下此前几轮用户原话（追问场景）。后端把它拼进解析上下文，
+    # 避免每轮只看到当前半句、把已经说过的区域/时间/指标重复追问。
+    history: list[str] = Field(default_factory=list)
     upload_id: str | None = None
 
 
@@ -234,6 +237,7 @@ def chat(body: ChatBody) -> StreamingResponse:
 
         run = flow.run_one_sentence(
             body.message,
+            history=body.history,
             upload=record,
             output_dir=current.output_dir,
             request_id=request_id,

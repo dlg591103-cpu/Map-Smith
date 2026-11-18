@@ -15,6 +15,9 @@ const attachment = ref<UploadInfo | null>(null)
 const pendingCrs = ref<CrsRequired | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 const lastRequest = ref<{ message: string; uploadId: string | null } | null>(null)
+// 追问期间累积的用户原话。后端把这些拼进解析上下文，避免「说了徐州又让说徐州」
+// 的死循环；出图成功或新建对话时清空。
+const pendingContext = ref<string[]>([])
 
 const suggestions = [
   '徐州 2026-11-01 的 PM2.5 分布图',
@@ -113,8 +116,11 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
   busy.value = true
   lastRequest.value = { message: content, uploadId: uploadId || null }
 
+  // 带着追问上下文发送：上一轮是追问时，把之前说过的话一起交给后端。
+  const history = [...pendingContext.value]
+
   try {
-    await streamPost('/api/chat', { message: content, upload_id: uploadId }, (event, data) => {
+    await streamPost('/api/chat', { message: content, history, upload_id: uploadId }, (event, data) => {
       if (event === 'stage') {
         assistant.stage = String(data.label || data.stage || '处理中')
       } else if (event === 'crs_required') {
@@ -125,10 +131,18 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
         busy.value = false
       } else if (event === 'result') {
         assistant.stage = undefined
-        assistant.result = data as unknown as ResultPayload
+        const payload = data as unknown as ResultPayload
+        assistant.result = payload
+        // 仍在追问：把这次的原话攒进上下文，下一轮一起发送；否则话题结束，清空。
+        if (payload.questions && payload.questions.length > 0) {
+          pendingContext.value = [...history, content]
+        } else {
+          pendingContext.value = []
+        }
       } else if (event === 'error') {
         assistant.stage = undefined
         assistant.error = String(data.message || '请求失败')
+        pendingContext.value = []
       } else if (event === 'done') {
         assistant.stage = undefined
         busy.value = false

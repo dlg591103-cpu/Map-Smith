@@ -103,6 +103,13 @@ _TIME_PATTERNS = (
     re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日"),
 )
 
+# 缺年份的日期写法（「11月1日」「11/1」「11-01」）。用户口语里极常见，
+# 早先只认 4 位年份，导致「11月1日」永远解析为空、反复追问同一天。
+_PARTIAL_TIME_PATTERNS = (
+    re.compile(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]"),
+    re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})(?!\d)"),
+)
+
 
 def _allow_online() -> bool:
     """是否允许联网取数。默认关闭（离线优先，演示稳定）。
@@ -179,7 +186,11 @@ def _clean(value: Any) -> str:
 
 
 def normalize_time(value: Any) -> str:
-    """把常见日期写法归一为 `YYYY-MM-DD`；无法识别返回空串。"""
+    """把常见日期写法归一为 `YYYY-MM-DD`；无法识别返回空串。
+
+    缺年份的写法（「11月1日」「11/1」）补「今天所在年」——用户口语里几乎不会
+    带年份，早先只认 4 位年份会让这个字段永远解析失败、系统反复追问同一天。
+    """
     text = _clean(value)
     if not text:
         return ""
@@ -190,6 +201,15 @@ def normalize_time(value: Any) -> str:
         year, month, day = (int(part) for part in match.groups())
         try:
             return datetime(year, month, day).date().isoformat()
+        except ValueError:
+            return ""
+    for pattern in _PARTIAL_TIME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        month, day = (int(part) for part in match.groups())
+        try:
+            return datetime(datetime.now().year, month, day).date().isoformat()
         except ValueError:
             return ""
     return ""
@@ -231,15 +251,27 @@ def normalize_parse(raw: Mapping[str, Any] | None) -> RequestParse:
     return RequestParse(request=request, questions=questions[:MAX_QUESTIONS], raw=data or None)
 
 
-def parse_request(text: str, llm_callable: Callable[[str, Mapping[str, Any]], Any]) -> RequestParse:
-    """一句话 → DataSteward prompt → `RequestParse`。"""
+def parse_request(
+    text: str,
+    llm_callable: Callable[[str, Mapping[str, Any]], Any],
+    history: list[str] | None = None,
+) -> RequestParse:
+    """一句话 → DataSteward prompt → `RequestParse`。
+
+    ``history`` 是同一话题下此前几轮用户说的原话（追问场景）。把它拼进
+    ``user_text`` 交给模型统一抽取，避免每轮只看到当前半句、把前面已经说过的
+    区域/时间/指标重新问一遍（多轮死循环）。
+    """
     if not _clean(text):
         return RequestParse(
             request={"place": "", "time": "", "metric": ""},
             questions=["请说一下区域、时间和指标，例如：徐州 2026-11-01 的 PM2.5。"],
         )
+    turns = [str(item).strip() for item in (history or []) if _clean(item)]
+    user_text = "\n".join([*turns, str(text).strip()]) if turns else str(text).strip()
     payload = {
-        "user_text": str(text).strip(),
+        "user_text": user_text,
+        "multi_turn": bool(turns),
         "known_fields": {"place": "", "time": "", "metric": ""},
         "output_schema": {
             "place": "区域名称，缺项填空字符串",
@@ -1054,6 +1086,7 @@ def _needs_input(parse: RequestParse, summary: str = "信息不足，需要先�
 def run_one_sentence(
     text: str,
     *,
+    history: list[str] | None = None,
     llm_callable: Callable[[str, Mapping[str, Any]], Any] | None = None,
     upload: UploadRecord | None = None,
     output_dir: Path | str | None = None,
@@ -1063,12 +1096,16 @@ def run_one_sentence(
     clock: Callable[[], float] | None = None,
     on_stage: Callable[[str, str], None] | None = None,
 ) -> FlowRun:
-    """一句话 → 解析 → `loop.run`；缺项时直接反问，不加载数据。"""
+    """一句话 → 解析 → `loop.run`；缺项时直接反问，不加载数据。
+
+    ``history`` 是同一话题下此前几轮用户原话，用于把多轮追问补的字段合并起来
+    （见 `parse_request`）。
+    """
     current = settings or get_settings()
     emit = _make_emitter(on_stage)
     emit("parsing")
     caller = llm_callable or default_llm_callable(settings=current)
-    parse = parse_request(text, caller)
+    parse = parse_request(text, caller, history=history)
     if parse.questions:
         return _needs_input(parse)
 

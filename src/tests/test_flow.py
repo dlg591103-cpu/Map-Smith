@@ -112,6 +112,18 @@ def test_normalize_time_accepts_common_formats():
     assert flow.normalize_time("2026年11月1日") == "2026-11-01"
 
 
+def test_normalize_time_accepts_year_less_dates():
+    """口语里「11月1日」不带年份很常见，必须补当年而不是留空。
+
+    早先只认 4 位年份，「11月1日」永远解析为空，系统会反复追问同一天。
+    """
+    year = flow.datetime.now().year  # noqa: SLF001 - 直接取模块里已导入的 datetime
+    assert flow.normalize_time("11月1日") == f"{year}-11-01"
+    assert flow.normalize_time("11月1号") == f"{year}-11-01"
+    assert flow.normalize_time("11/1") == f"{year}-11-01"
+    assert flow.normalize_time("11-01") == f"{year}-11-01"
+
+
 def test_normalize_time_rejects_unparseable_value():
     assert flow.normalize_time("最近几天") == ""
     assert flow.normalize_time(None) == ""
@@ -185,6 +197,43 @@ def test_parse_request_empty_text_asks_without_calling_model():
 
     parsed = flow.parse_request("   ", fake_llm)
     assert parsed.questions
+
+
+def test_parse_request_merges_history_into_user_text():
+    """多轮追问：之前的原话要拼进 user_text，否则模型每轮只看半句、反复追问。
+
+    复现路径：先说「徐州 pm2.5 分布图」（缺时间）→ 追问 → 再说「11月1日」。
+    若不带 history，模型只看到「11月1日」，会重新问区域与指标，形成死循环。
+    """
+    captured: dict = {}
+
+    def fake_llm(system_prompt: str, payload):
+        captured["payload"] = payload
+        return {"place": "徐州", "time": "11月1日", "metric": "PM2.5"}
+
+    parsed = flow.parse_request(
+        "11月1日",
+        fake_llm,
+        history=["徐州 pm2.5 分布图"],
+    )
+
+    assert captured["payload"]["multi_turn"] is True
+    assert captured["payload"]["user_text"] == "徐州 pm2.5 分布图\n11月1日"
+    assert parsed.questions == []
+    # 「11月1日」缺年份也要解析出日期（补当年）
+    assert parsed.request["time"].endswith("-11-01")
+
+
+def test_parse_request_without_history_keeps_single_turn():
+    captured: dict = {}
+
+    def fake_llm(system_prompt: str, payload):
+        captured["payload"] = payload
+        return {"place": "徐州", "time": "20261101", "metric": "PM2.5"}
+
+    flow.parse_request("徐州 20261101 的 PM2.5", fake_llm)
+    assert captured["payload"]["multi_turn"] is False
+    assert "\n" not in captured["payload"]["user_text"]
 
 
 # --- 制图 -----------------------------------------------------------------
