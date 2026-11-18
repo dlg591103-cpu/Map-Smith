@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent
 # .env.example 是 LLM 配置模板（占位符，不含真实 key），随 zip 分发；
 # .env 本身在 .gitignore 中，不入库、不进 zip。
 PACK_FILES = [
+    "start.cmd",
     "run.ps1",
     "run.sh",
     "Dockerfile",
@@ -36,6 +37,7 @@ PACK_DIRS = ["src", "web/dist"]
 
 # 打包后必须存在的条目；缺任何一项都说明产物不可一键启动。
 REQUIRED_ENTRIES = (
+    "start.cmd",
     "run.ps1",
     "run.sh",
     "Dockerfile",

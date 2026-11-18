@@ -60,14 +60,22 @@ Map Smith 提供第三条路：用日常语言描述需求，几分钟内拿到�
 
 1.  打开 [Releases](https://github.com/dlg591103-cpu/Map-Smith/releases/latest)，下载最新的 `mapsmith-v0.2.0.zip`。
 2.  解压到任意目录。
-3.  在解压后的根目录启动：
-    -   Windows PowerShell：`.\run.ps1`
+3.  启动：
+    -   **Windows：双击 `start.cmd`**（推荐，自动找 Python、装依赖、开浏览器）
     -   macOS / Linux：`./run.sh`
+    -   或手动用 `.\run.ps1`（Windows PowerShell）
 4.  浏览器打开 [http://127.0.0.1:8501](http://127.0.0.1:8501)。
 5.  点侧栏底部 **「⚙ 设置 API」** 填入自己的 Key（见[配置 API Key](#配置-api-key推荐在界面内完成)）。
     不填也能用：表单模式 + 内置离线数据可以直接出图。
 
-首次运行会自动创建 `.venv` 并按 `src/requirements.lock` 安装依赖，需要几分钟。若 Windows 执行策略阻止脚本，改用：
+**首次运行会自动创建 `.venv` 并安装约 60 个依赖，需要 2–5 分钟**（`start.cmd` 会走华为云镜像，失败自动回退官方源）。之后再启动只需几秒。
+
+> **Windows 用户请优先用 `start.cmd`**：
+> - `.cmd` 不受 PowerShell 执行策略限制，双击即可
+> - 会自动在常见安装位置与 PATH 中查找 Python 3.12
+> - 找不到时按提示装好 Python 并勾选「Add python.exe to PATH」
+
+若坚持用 PowerShell，执行策略可能阻止 `.ps1`，改用：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run.ps1
