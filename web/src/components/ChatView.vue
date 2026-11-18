@@ -45,7 +45,7 @@ function confirmCost(): void {
 
 /** 余额不足时直接引导到聚汇会员中心，避免反复点确认还是买不到。 */
 function openRecharge(): void {
-  window.open('https://www.gotohui.com/user/', '_blank', 'noopener')
+  window.open('https://www.gotohui.com/member/recharge', '_blank', 'noopener')
 }
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
