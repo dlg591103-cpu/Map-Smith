@@ -662,6 +662,23 @@ pre {
   font-size: 14px;
   color: var(--text);
 }
+.group-tip {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.group-tip strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.group-tip a {
+  color: var(--brand);
+  text-decoration: none;
+}
+.group-tip a:hover {
+  text-decoration: underline;
+}
 .field-label {
   display: block;
   font-size: 12px;

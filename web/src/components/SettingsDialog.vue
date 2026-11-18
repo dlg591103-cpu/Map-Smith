@@ -85,6 +85,10 @@ watch(
       <template v-else>
         <section class="settings-group">
           <h4>对话模型（LLM）</h4>
+          <p class="group-tip">
+            两条路选一：本机已装 <strong>Ollama</strong> 就保持默认地址（密钥随便填个非空值）；
+            用 <strong>DeepSeek / OpenAI 等云端服务</strong> 则改地址、填真实密钥、填对应模型名。
+          </p>
           <label class="field-label" for="s-llm-url">API 地址</label>
           <input
             id="s-llm-url"
@@ -108,6 +112,10 @@ watch(
 
         <section class="settings-group">
           <h4>统计数据（聚汇）</h4>
+          <p class="group-tip">
+            不填也能出空气质量图；要画 GDP、人口等统计图才需要。到
+            <a href="https://www.gotohui.com/member/api-keys" target="_blank" rel="noopener">gotohui.com</a> 注册后创建。
+          </p>
           <label class="field-label" for="s-stats-key">API Key</label>
           <input
             id="s-stats-key"
