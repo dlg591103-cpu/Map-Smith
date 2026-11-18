@@ -112,14 +112,18 @@ _PARTIAL_TIME_PATTERNS = (
 
 
 def _allow_online() -> bool:
-    """是否允许联网取数。默认关闭（离线优先，演示稳定）。
+    """是否允许联网取数。**默认开启**，语义是「离线优先」：
 
-    设环境变量 ``MAPSMITH_ALLOW_ONLINE=1`` 时开启：本地 ``demo_data/`` 找不到
-    对应日期或边界时，才回落到 quotsoft / DataV 在线下载；联网失败仍抛出明确
-    错误（不伪造数据），不影响已缓存的离线日期。
+    - 本地 ``demo_data/`` 有该日期/边界 → 直接用本地，绝不联网；
+    - 本地没有 → 才回落到 quotsoft / DataV 在线下载（下载成功会落盘缓存）；
+    - 联网失败 → 抛明确错误，不伪造数据。
+
+    现场断网演示时设 ``MAPSMITH_OFFLINE=1`` 可强制离线，省去每次等待下载超时
+    （quotsoft 实测约 12 KB/s，1.5 MB 单日文件要两分钟左右，建议改用
+    ``warmup_data.py`` 提前预热）。
     """
-    raw = os.environ.get("MAPSMITH_ALLOW_ONLINE", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    raw = os.environ.get("MAPSMITH_OFFLINE", "").strip().lower()
+    return raw not in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)

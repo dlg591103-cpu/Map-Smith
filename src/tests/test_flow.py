@@ -130,6 +130,23 @@ def test_normalize_time_rejects_unparseable_value():
     assert flow.normalize_time("2026-02-30") == ""
 
 
+def test_allow_online_defaults_on_and_offline_env_disables(monkeypatch):
+    """联网默认开启（离线优先语义），MAPSMITH_OFFLINE=1 才强制离线。
+
+    「离线优先」指本地有数据就绝不联网，只有本地缺该日期/边界时才回落下载；
+    与之配套的关闭开关是 MAPSMITH_OFFLINE，不是旧的 MAPSMITH_ALLOW_ONLINE。
+    """
+    monkeypatch.delenv("MAPSMITH_OFFLINE", raising=False)
+    assert flow._allow_online() is True
+
+    for value in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("MAPSMITH_OFFLINE", value)
+        assert flow._allow_online() is False
+
+    monkeypatch.setenv("MAPSMITH_OFFLINE", "0")
+    assert flow._allow_online() is True
+
+
 def test_map_metric_maps_aliases_and_keeps_unknown():
     assert flow.map_metric("PM2.5") == "PM2_5_24h"
     assert flow.map_metric("pm2_5_24h") == "PM2_5_24h"

@@ -267,7 +267,9 @@ def load_air(
     sites_path: str | Path | None = None,
     data_path: str | Path | None = None,
     online: bool = True,
-    timeout: float = 20.0,
+    # 单日全国站点 CSV 约 1.5 MB，quotsoft 实测下行约 12 KB/s，20 秒太紧；
+    # 这里是「无数据到达」的读取超时，正常下载不会反复触发。
+    timeout: float = 120.0,
 ) -> DataLayer:
     """加载某城市某日的站点空气质量。`day` 支持 `YYYYMMDD` 或 `YYYY-MM-DD`。"""
     day_text = str(day).replace("-", "")
