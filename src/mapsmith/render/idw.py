@@ -119,12 +119,22 @@ def _point_in_polygon(x: float, y: float, polygon: np.ndarray) -> bool:
     return inside
 
 
-def _admin_mask(admin_geom: Any, grid_x: Any, grid_y: Any) -> Any:
-    """行政界掩膜：网格点是否落在行政面内（支持多面与洞）。"""
-    from shapely import contains_xy
+def _geometry_path(geom: Any) -> Any:
+    """把 shapely 面几何转成 matplotlib Path（多面与洞都支持），用于裁剪栅格。"""
+    from matplotlib.path import Path
 
-    inside = contains_xy(admin_geom, np.ravel(grid_x), np.ravel(grid_y))
-    return np.asarray(inside, dtype=bool).reshape(np.shape(grid_x))
+    polygons = list(getattr(geom, "geoms", [geom]))
+    paths = []
+    for polygon in polygons:
+        if getattr(polygon, "geom_type", "") not in {"Polygon", "MultiPolygon"}:
+            continue
+        for ring in [polygon.exterior] + list(polygon.interiors):
+            coords = np.asarray(ring.coords, dtype=float)
+            if len(coords) >= 3:
+                paths.append(Path(coords, closed=True))
+    if not paths:
+        return Path(np.empty((0, 2)))
+    return Path.make_compound_path(*paths)
 
 
 @dataclass
@@ -273,20 +283,11 @@ def render_idw(
     )
     hull_area_km2 = hull_area_m2 / 1e6
 
-    # 掩膜：凸包内是实测站点支撑的插值，凸包外是最近站点外推的推测值。给了行政面
-    # 就放开到行政界内全域（注记已注明），这样出图才是「整个行政区」的分布图。
+    # 掩膜：没有行政面时只画站点凸包；有行政面时全域外插，改由矢量省界裁剪
+    # （逐像元掩膜在省界处必然留下锯齿与缝隙，贴不住矢量边界）。
     extrapolated = admin_meas is not None
-    clip_mask = hull
-    if extrapolated:
-        try:
-            admin_geom = admin_meas.union_all()
-        except AttributeError:  # shapely < 2.0 或旧 geopandas
-            from shapely.ops import unary_union
-
-            admin_geom = unary_union(list(admin_meas.geometry))
-        clip_mask = _admin_mask(admin_geom, grid_x, grid_y)
-
-    grid_z[~clip_mask] = np.nan
+    if not extrapolated:
+        grid_z[~hull] = np.nan
 
     # --- 把栅格坐标从度量投影转回输出 CRS，用 imshow 显示 ---
     from pyproj import Transformer
@@ -294,11 +295,36 @@ def render_idw(
     transformer = Transformer.from_crs(measurement, spec.crs, always_xy=True)
     grid_x_out, grid_y_out = transformer.transform(grid_x, grid_y)
 
-    # imshow 需要规则网格的 extent；用输出 CRS 的 bbox。
-    extent_out = _transformed_extent(spec)
+    # imshow 的 extent 必须与栅格自身范围一致：网格是绕行政界外扩 2% 的，若仍用
+    # spec.extent.bbox，栅格会被压进图框，色块与底图省界之间出现错位缝隙。
+    extent_out = (
+        float(np.nanmin(grid_x_out)),
+        float(np.nanmin(grid_y_out)),
+        float(np.nanmax(grid_x_out)),
+        float(np.nanmax(grid_y_out)),
+    )
     minx_o, miny_o, maxx_o, maxy_o = extent_out
 
     fig, ax = plt.subplots(figsize=spec.layout.size)
+
+    # 用矢量行政界裁剪栅格：色块边缘严格贴合省界，不会出现逐像元掩膜的锯齿缝隙。
+    clip_patch = None
+    if extrapolated:
+        from matplotlib.patches import PathPatch
+
+        try:
+            admin_geom = background_spec.union_all()
+        except AttributeError:  # shapely < 2.0 或旧 geopandas
+            from shapely.ops import unary_union
+
+            admin_geom = unary_union(list(background_spec.geometry))
+        clip_patch = PathPatch(
+            _geometry_path(admin_geom),
+            transform=ax.transData,
+            facecolor="none",
+            edgecolor="none",
+        )
+        ax.add_patch(clip_patch)
 
     if background_spec is not None:
         # 浅灰行政底图：读者能看清色块落在行政区的哪一段，以及哪些区域没有站点。
@@ -321,7 +347,7 @@ def render_idw(
             raise DataError(f"未知配色方案 {scheme!r}") from exc
     vmin = float(np.nanmin(grid_z))
     vmax = float(np.nanmax(grid_z))
-    ax.imshow(
+    image = ax.imshow(
         grid_z,
         extent=(minx_o, maxx_o, miny_o, maxy_o),
         origin="lower",
@@ -331,6 +357,8 @@ def render_idw(
         aspect=_aspect_for(spec.crs, spec.extent.bbox),
         zorder=1,
     )
+    if clip_patch is not None:
+        image.set_clip_path(clip_patch)
 
     # --- 站点叠加 ---
     if missing_count > 0:

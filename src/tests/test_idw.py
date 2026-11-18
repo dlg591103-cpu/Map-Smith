@@ -277,18 +277,22 @@ def test_render_unimplemented_map_type_still_raises() -> None:
 # --- 行政界裁剪 ---
 
 
-def test_admin_mask_marks_inside_and_outside() -> None:
-    """网格点落在行政面内为 True，面外为 False。"""
-    from mapsmith.render.idw import _admin_mask
+def test_geometry_path_builds_closed_rings() -> None:
+    """矢量裁剪路径：多面与洞都要转成闭合路径，用于把栅格裁到行政界。"""
+    from shapely.geometry import Polygon
 
-    geom = box(0.0, 0.0, 2.0, 2.0)
-    gx, gy = np.meshgrid(np.linspace(-1, 3, 5), np.linspace(-1, 3, 5))
+    from mapsmith.render.idw import _geometry_path
 
-    mask = _admin_mask(geom, gx, gy)
+    polygon = Polygon(
+        [(0, 0), (4, 0), (4, 4), (0, 4)],
+        holes=[[(1, 1), (1, 2), (2, 2), (2, 1)]],
+    )
 
-    assert mask.shape == gx.shape
-    assert bool(mask[2, 2]) is True   # 中心在面内
-    assert bool(mask[0, 0]) is False  # 角点在面外
+    path = _geometry_path(polygon)
+
+    assert path.vertices.shape[1] == 2
+    assert len(path.codes) == len(path.vertices)
+    assert path.vertices.shape[0] >= 8  # 外环 + 内环各自闭合
 
 
 def test_render_idw_with_background_crops_to_admin_area() -> None:

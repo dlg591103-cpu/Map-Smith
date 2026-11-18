@@ -1,12 +1,36 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { confirmCrs as confirmCrsApi, streamPost, uploadFile } from '../api'
-import type { CrsRequired, FormState, ResultPayload, UploadInfo } from '../types'
-import { FIELD_OPTIONS, MAP_TYPES, METHODS, PALETTES } from '../types'
+import type { CrsRequired, FormState, OptionItem, ResultPayload, UploadInfo } from '../types'
+import {
+  FIELD_OPTIONS,
+  MAP_TYPE_OPTIONS,
+  METRIC_LABELS,
+  METHOD_OPTIONS,
+  N_HINT,
+  OVERLAY_OPTIONS,
+  PALETTE_OPTIONS,
+} from '../types'
 import CrsDialog from './CrsDialog.vue'
 import ResultCard from './ResultCard.vue'
 
 defineProps<{ llmConfigured: boolean }>()
+
+/** 选项里的中文说明：给一个 value 找到它的 hint。 */
+function hintOf(options: OptionItem[], value: string): string {
+  return options.find((item) => item.value === value)?.hint || ''
+}
+
+/** 空气质量字段名（PM2_5_24h）对非专业用户不友好，下拉里显示中文名。 */
+function metricLabel(value: string): string {
+  return METRIC_LABELS[value] || value
+}
+
+/** 当前指标的一句解释：空气质量给通俗说法，统计指标说明计费差异。 */
+const selectedMetricHint = computed(() => {
+  if (METRIC_LABELS[form.metric]) return '空气质量指标：按全国监测站点逐日数据出图，免费。'
+  return '社会经济统计指标：省级走免费榜单；画到「市级下辖区县」需要积分，提交后会先确认费用。'
+})
 
 const form = reactive<FormState>({
   place: '徐州',
@@ -134,46 +158,62 @@ async function submit(confirmCost = false): Promise<void> {
         </div>
 
         <div class="field">
-          <label>指标字段</label>
+          <label>指标（画什么）</label>
           <select v-model="form.metric">
-            <option v-for="option in FIELD_OPTIONS" :key="option" :value="option">{{ option }}</option>
+            <option v-for="option in FIELD_OPTIONS" :key="option" :value="option">
+              {{ metricLabel(option) }}
+            </option>
           </select>
+          <p class="hint">{{ selectedMetricHint }}</p>
         </div>
         <div class="field">
-          <label>图种</label>
+          <label>图种（怎么画）</label>
           <select v-model="form.map_type">
-            <option v-for="option in MAP_TYPES" :key="option" :value="option">{{ option }}</option>
+            <option v-for="option in MAP_TYPE_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
           </select>
+          <p class="hint">{{ hintOf(MAP_TYPE_OPTIONS, form.map_type) }}</p>
         </div>
 
         <div v-if="form.map_type === 'buffer'" class="field">
-          <label>缓冲距离（km）</label>
+          <label>缓冲距离（公里）</label>
           <input v-model="form.buffer_km" type="number" min="0.1" max="200" step="0.5" />
+          <p class="hint">以每个站点为圆心画圆，半径就是这个距离。默认 5 公里。</p>
         </div>
         <div v-if="form.map_type === 'overlay'" class="field">
           <label>叠加方式</label>
           <select v-model="form.overlay_op">
-            <option value="clip">clip（裁剪）</option>
-            <option value="intersection">intersection（相交）</option>
+            <option v-for="option in OVERLAY_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
           </select>
+          <p class="hint">{{ hintOf(OVERLAY_OPTIONS, form.overlay_op) }}</p>
         </div>
 
         <div class="field">
-          <label>分级方法</label>
+          <label>分级方法（怎么分档）</label>
           <select v-model="form.method">
-            <option v-for="option in METHODS" :key="option" :value="option">{{ option }}</option>
+            <option v-for="option in METHOD_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
           </select>
+          <p class="hint">{{ hintOf(METHOD_OPTIONS, form.method) }}</p>
         </div>
         <div class="field">
-          <label>级数：{{ form.n }}</label>
+          <label>级数：{{ form.n }} 级</label>
           <input v-model.number="form.n" type="range" min="2" max="9" step="1" />
+          <p class="hint">{{ N_HINT }}</p>
         </div>
 
         <div class="field">
           <label>配色方案</label>
           <select v-model="form.palette_scheme">
-            <option v-for="option in PALETTES" :key="option" :value="option">{{ option }}</option>
+            <option v-for="option in PALETTE_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
           </select>
+          <p class="hint">{{ hintOf(PALETTE_OPTIONS, form.palette_scheme) }}</p>
         </div>
         <div class="field">
           <label>数据文件（可选）</label>
@@ -187,18 +227,19 @@ async function submit(confirmCost = false): Promise<void> {
             hidden
             @change="pickFile"
           />
+          <p class="hint">不上传就用系统内置数据；有自己的数据（点位 CSV、面数据）可以上传。</p>
         </div>
       </div>
 
       <label class="checkline">
         <input v-model="form.palette_reverse" type="checkbox" />
-        配色反转
+        配色反转（深浅方向对调）
       </label>
       <p v-if="form.map_type === 'buffer'" class="hint">
-        buffer：以点数据生成缓冲区，按缓冲区内站点指标均值分级；缓冲距离默认 5 km。
+        缓冲区图：以点数据生成缓冲区，按缓冲区内站点指标均值分级。
       </p>
       <p v-else-if="form.map_type === 'overlay'" class="hint">
-        overlay：需上传面图层作为主体（在「数据文件」处上传），第二图层使用所选区域的 demo 边界。
+        叠加图：需上传面图层作为主体（在「数据文件」处上传），第二图层使用所选区域的边界。
       </p>
 
       <div class="form-actions">
