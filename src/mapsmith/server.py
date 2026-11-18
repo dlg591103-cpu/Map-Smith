@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import re
 import threading
@@ -15,11 +16,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from . import flow
+from . import sessions as session_store
 from .agents.llm import LLMError, LLMNotConfigured, configured
 from .config import Settings, get_settings
 from .io.models import CrsNotDeclared, DataError, FieldMissing
@@ -30,16 +33,39 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 ALLOWED_SUFFIXES = {".csv", ".geojson", ".json", ".zip"}
 ALLOWED_FILENAMES = {"web_map.png", "web_map.pdf"}
 UPLOAD_REGISTRY: dict[str, flow.UploadRecord] = {}
+_LOG = logging.getLogger("mapsmith.server")
 
 app = FastAPI(title="MapSmith", version=APP_VERSION)
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """把 422 的原始请求体打到日志里。
+
+    FastAPI 默认只在响应里给 detail，前端拿不到「哪个字段错了」时很难自查；
+    这里留一条服务端日志，配合前端展示的 detail 能直接定位。
+    """
+    try:
+        raw = (await request.body())[:2000].decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 - 日志失败不能影响响应
+        raw = "<unreadable>"
+    _LOG.warning("422 on %s body=%s errors=%s", request.url.path, raw, exc.errors()[:5])
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
 class ChatBody(BaseModel):
     message: str = ""
+    # 同一话题下此前几轮用户原话（追问场景）。后端把它拼进解析上下文，
+    # 避免每轮只看到当前半句、把已经说过的区域/时间/指标重复追问。
+    history: list[str] = Field(default_factory=list)
+    # 用户已确认承担取数积分（区县级统计数据 1 积分/指标）后置 true。
+    confirm_cost: bool = False
     upload_id: str | None = None
 
 
 class FormBody(BaseModel):
+    # 用户已确认承担取数积分后置 true（见 ChatBody.confirm_cost）。
+    confirm_cost: bool = False
     place: str = ""
     time: str = ""
     metric: str = ""
@@ -51,13 +77,21 @@ class FormBody(BaseModel):
     label_field: str | None = None
     show_label: bool = False
     upload_id: str | None = None
-    # T25：buffer / overlay 参数
-    buffer_km: str | None = None
+    # T25：buffer / overlay 参数。
+    # buffer_km 必须允许数字：前端 `<input type="number">` 会被 Vue 3 的 v-model
+    # 自动转成 number，早先只声明 str 会让「生成地图」直接 422（用户实测踩到）。
+    buffer_km: float | str | None = None
     overlay_op: str | None = None
 
 
 class CrsBody(BaseModel):
     crs: str
+
+
+class SessionSaveBody(BaseModel):
+    # 前端把整段对话原样回传；只保留展示字段，校验在 sessions 模块里做。
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    title: str | None = None
 
 
 def _settings() -> Settings:
@@ -81,6 +115,11 @@ def _upload_record(upload_id: str | None) -> flow.UploadRecord | None:
     if record is None:
         raise DataError("上传记录不存在或已过期，请重新上传文件")
     return record
+
+
+def _sessions_root() -> Path:
+    """会话文件跟着产物目录走，容器挂载 out/ 时一起持久化。"""
+    return session_store.sessions_root(_settings().output_dir)
 
 
 def _crs_required_event(record: flow.UploadRecord) -> dict[str, Any]:
@@ -146,6 +185,31 @@ def _stream(worker_body: Any) -> StreamingResponse:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "llm_configured": configured(_settings()), "version": APP_VERSION}
+
+
+@app.get("/api/stats/balance")
+def stats_balance() -> dict[str, Any]:
+    """聚汇账户余额与额度（免费接口）。
+
+    只读、不扣积分；未配置 `MAPSMITH_STATS_API_KEY` 时返回 ``configured: false``，
+    前端据此决定是否显示余额。
+    """
+    from .tools.stats_api import fetch_account_balance, stats_api_key
+
+    if not stats_api_key():
+        return {"configured": False}
+    data = fetch_account_balance()
+    if data is None:
+        return {"configured": True, "available": False}
+    return {
+        "configured": True,
+        "available": True,
+        "points_balance": data.get("points_balance"),
+        "data_points_cost": data.get("data_points_cost"),
+        "access_validity_days": data.get("access_validity_days"),
+        "daily_limit": data.get("daily_limit"),
+        "daily_used": data.get("daily_used"),
+    }
 
 
 @app.post("/api/upload")
@@ -234,6 +298,8 @@ def chat(body: ChatBody) -> StreamingResponse:
 
         run = flow.run_one_sentence(
             body.message,
+            history=body.history,
+            confirm_cost=body.confirm_cost,
             upload=record,
             output_dir=current.output_dir,
             request_id=request_id,
@@ -258,6 +324,7 @@ def form(body: FormBody) -> StreamingResponse:
 
         run = flow.run_form(
             body.model_dump(),
+            confirm_cost=body.confirm_cost,
             upload=record,
             output_dir=current.output_dir,
             request_id=request_id,
@@ -267,6 +334,50 @@ def form(body: FormBody) -> StreamingResponse:
         yield "result", _result_payload(run, request_id)
 
     return _stream(worker)
+
+
+@app.post("/api/sessions")
+def create_session() -> dict[str, Any]:
+    """新建会话只发一个 ID 空壳：没说话就不落盘，侧栏不会被空条目占满。"""
+    return session_store.empty_session(session_store.new_session_id())
+
+
+@app.get("/api/sessions")
+def list_sessions() -> dict[str, Any]:
+    return {"sessions": session_store.list_sessions(_sessions_root())}
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: str) -> dict[str, Any]:
+    try:
+        data = session_store.load_session(_sessions_root(), session_id)
+    except session_store.SessionError as exc:
+        # 非法 ID 与「不存在」对外不区分，避免暴露目录规则。
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if data is None:
+        raise HTTPException(status_code=404, detail="会话不存在或已删除")
+    return data
+
+
+@app.put("/api/sessions/{session_id}")
+def put_session(session_id: str, body: SessionSaveBody) -> dict[str, Any]:
+    try:
+        return session_store.save_session(
+            _sessions_root(), session_id, body.messages, title=body.title
+        )
+    except session_store.SessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str) -> dict[str, Any]:
+    try:
+        removed = session_store.delete_session(_sessions_root(), session_id)
+    except session_store.SessionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="会话不存在或已删除")
+    return {"ok": True}
 
 
 @app.get("/api/output/{request_id}/{filename}")

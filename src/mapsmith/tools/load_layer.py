@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import io as text_io
+import time
 from datetime import date as date_type
 from pathlib import Path
 from typing import Any
@@ -78,18 +79,68 @@ def _local_admin_paths(adcode: str) -> list[Path]:
     return [root / f"{adcode}_full.json", root / f"{adcode}.json"]
 
 
+# 国内数据源（quotsoft）直连通常比经系统代理更稳，但个别网络只能走代理，
+# 所以按「直连 → 直连 → 环境代理」的顺序尝试：两次直连容忍一次瞬时抖动，最后用代理兜底。
+_DOWNLOAD_PLAN = (False, False, True)
+_RETRY_DELAY_S = 2.0
+# 整体预算：quotsoft 单日文件约 1.6 MB、下行可能只有 12 KB/s，一次就可能上百秒，
+# 预算耗尽后不再继续重试，避免用户界面长时间无响应。
+_DOWNLOAD_BUDGET_S = 240.0
+_CONNECT_TIMEOUT_S = 15.0
+
+
+def _fetch_once(url: str, timeout: float, *, trust_env: bool) -> str:
+    import requests
+
+    session = requests.Session()
+    session.trust_env = trust_env
+    try:
+        response = session.get(url, timeout=(_CONNECT_TIMEOUT_S, timeout))
+    finally:
+        session.close()
+    if response.status_code != 200:
+        raise DataError(f"数据源返回 HTTP {response.status_code}：{url}")
+    return response.text
+
+
+def _net_hint(requests: Any, exc: BaseException | None) -> str:
+    """把 requests 的原始异常翻成用户能看懂的一句话；技术细节只留类型名。"""
+    errors = requests.exceptions
+    if exc is None:
+        return "数据源请求失败"
+    if isinstance(exc, errors.SSLError):
+        return "数据源连接被中断（TLS 提前断开），通常是网络或代理不稳定"
+    if isinstance(exc, errors.ReadTimeout):
+        return "数据源响应超时（文件较大或网速过慢）"
+    if isinstance(exc, errors.ConnectTimeout):
+        return "连接数据源超时"
+    if isinstance(exc, errors.ConnectionError):
+        return "无法连接数据源（连接被重置或网络不可达）"
+    return f"数据源请求失败（{type(exc).__name__}）"
+
+
 def _download(url: str, timeout: float) -> str:
     try:
         import requests
     except ImportError as exc:
         raise DataError("缺少 requests，无法联网取数据；请按 requirements.lock 安装依赖") from exc
-    try:
-        response = requests.get(url, timeout=timeout)
-    except requests.RequestException as exc:
-        raise DataError(f"联网请求失败：{url}（{exc}）") from exc
-    if response.status_code != 200:
-        raise DataError(f"联网请求返回 HTTP {response.status_code}：{url}")
-    return response.text
+
+    deadline = time.monotonic() + _DOWNLOAD_BUDGET_S
+    last: BaseException | None = None
+    attempts = 0
+    for index, trust_env in enumerate(_DOWNLOAD_PLAN):
+        if index and time.monotonic() > deadline:
+            break
+        attempts += 1
+        try:
+            return _fetch_once(url, timeout, trust_env=trust_env)
+        except requests.RequestException as exc:
+            last = exc
+            if time.monotonic() > deadline:
+                break
+            if index + 1 < len(_DOWNLOAD_PLAN):
+                time.sleep(_RETRY_DELAY_S)
+    raise DataError(f"{_net_hint(requests, last)}，已尝试 {attempts} 次仍失败：{url}")
 
 
 def _as_place(place: str | PlaceResult, *, online: bool, timeout: float) -> PlaceResult:
@@ -126,11 +177,20 @@ def load_admin(
         if not online:
             raise DataError(
                 f"没有 {resolved.full_name} 的离线边界文件，且已禁用联网；"
-                "请把 {adcode}_full.json 放入 demo_data/boundaries/"
+                f"请把 {adcode}_full.json 放入 demo_data/boundaries/"
             )
         text = _download(
             f"https://geo.datav.aliyun.com/areas_v3/bound/{adcode}_full.json", timeout
         )
+        # 落盘缓存：边界取过一次就够，之后离线也能重画。写的是 DataV 原始返回，
+        # 与已入库的 320300_full.json 等同源同格式；纠偏在加载之后做，不污染缓存。
+        try:
+            cached = get_settings().demo_data_dir / "boundaries" / f"{adcode}_full.json"
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            if not cached.exists():
+                cached.write_text(text, encoding="utf-8")
+        except OSError:
+            pass  # 缓存失败不影响本次出图
         gdf = gpd.read_file(text_io.StringIO(text))
         source_note = "DataV GeoAtlas 实时边界"
 
@@ -267,9 +327,14 @@ def load_air(
     sites_path: str | Path | None = None,
     data_path: str | Path | None = None,
     online: bool = True,
-    timeout: float = 20.0,
+    # 省级取数时传入省内各市名：quotsoft 的站点按「地级市」归属，
+    # 直接用省名（「浙江省」）匹配一个站都匹配不到。
+    city_names: list[str] | None = None,
+    # 单日全国站点 CSV 约 1.5 MB，quotsoft 实测下行约 12 KB/s，20 秒太紧；
+    # 这里是「无数据到达」的读取超时，正常下载不会反复触发。
+    timeout: float = 120.0,
 ) -> DataLayer:
-    """加载某城市某日的站点空气质量。`day` 支持 `YYYYMMDD` 或 `YYYY-MM-DD`。"""
+    """加载某城市（或某省内各市）某日的站点空气质量。`day` 支持 `YYYYMMDD`/`YYYY-MM-DD`。"""
     day_text = str(day).replace("-", "")
     if len(day_text) != 8 or not day_text.isdigit():
         raise DataError(f"日期格式应为 YYYYMMDD，实际为 {day!r}")
@@ -316,10 +381,22 @@ def load_air(
     series = series.drop(columns=["aggregate"]).rename(columns={"value": field})
     merged = sites.merge(series, on="station_code", how="inner")
 
-    city_matched = merged[merged["city"].str.contains(city_bare, na=False)]
+    if city_names:
+        # 省级取数：quotsoft 的站点按地级市归属，用省内各市名逐个匹配。
+        # 市名去掉「市」后缀后与站点表里的写法对齐（「杭州市」→「杭州」）。
+        bare_names = [str(name).strip().removesuffix("市") for name in city_names if str(name).strip()]
+        city_matched = merged[
+            merged["city"].astype(str).apply(
+                lambda city: any(name and name in city for name in bare_names)
+            )
+        ]
+        label = f"{resolved.full_name}下辖 {len(bare_names)} 个市"
+    else:
+        city_matched = merged[merged["city"].str.contains(city_bare, na=False)]
+        label = f"「{city_bare}」"
     if city_matched.empty:
         raise DataError(
-            f"{resolved.full_name}：站点列表中没有匹配「{city_bare}」的站点；"
+            f"{resolved.full_name}：站点列表中没有匹配{label}的站点；"
             "请确认站点列表是否包含该城市"
         )
 
@@ -368,3 +445,47 @@ def load_air(
             "station_crs": "EPSG:4326",
         },
     )
+
+# --- 预置社会经济统计数据（GDP / 人口等）----------------------------------
+# demo_data/stats/ 下按 `{adcode}_{指标}[_期次].csv` 命名，例如：
+#   320000_gdp_2025q3.csv   江苏省 13 个设区市 2025 年前三季度 GDP（亿元）
+# 数据须为真实公开统计（统计年鉴 / 统计公报），不生成示意值。
+PRESET_STATS_METRICS: dict[str, str] = {
+    "GDP": "gdp",
+    "gdp": "gdp",
+    "人口": "population",
+    "population": "population",
+}
+
+
+def preset_stat_key(metric: str) -> str | None:
+    """指标名 → 预置统计数据标识（gdp / population）；不是这类指标返回 None。"""
+    text = str(metric or "").strip()
+    if not text:
+        return None
+    return PRESET_STATS_METRICS.get(text) or PRESET_STATS_METRICS.get(text.lower())
+
+
+def load_preset_stats(adcode: str, metric_key: str) -> tuple[pd.DataFrame, str] | None:
+    """加载 `demo_data/stats/` 下的预置统计数据；没有则返回 None。
+
+    文件名约定 `{adcode}_{metric_key}[_期次].csv`，同期次取字典序最后一个（即最新）。
+    """
+    if not adcode or not metric_key:
+        return None
+    root = get_settings().demo_data_dir / "stats"
+    if not root.is_dir():
+        return None
+    candidates: list[Path] = []
+    for pattern in (f"{adcode}_{metric_key}_*.csv", f"{adcode}_{metric_key}.csv"):
+        candidates.extend(sorted(root.glob(pattern)))
+    if not candidates:
+        return None
+    path = candidates[-1]
+    try:
+        frame = pd.read_csv(path, encoding="utf-8-sig")
+    except Exception as exc:  # noqa: BLE001 - 预置文件损坏时如实报错
+        raise DataError(f"预置统计数据读取失败：{path.name}（{exc}）") from exc
+    if frame.empty:
+        return None
+    return frame, path.name

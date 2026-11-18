@@ -63,10 +63,14 @@ def _csv_to_layer(path: Path, name: str, crs: str | None) -> DataLayer:
     lat_col = _pick_column(columns, LAT_ALIASES)
 
     if lon_col is None or lat_col is None:
-        # 统计表：无坐标，供分级设色使用；几何关联由 analyze(join) 负责（T14）。
+        # 统计表：无坐标。出图时由 flow 自动按行政区名关联到边界（见
+        # flow._join_upload_table），用户不需要先自己转成面图层。
+        hint = ""
+        if len(columns) >= 2:
+            hint = "出图时会自动识别行政区名列并关联边界。"
         summary = (
             f"{name}：统计表 {len(df)} 行、{len(columns)} 列，编码 {encoding}。"
-            "未发现经纬度列，按统计表处理，需关联行政区后才能成图。"
+            f"未发现经纬度列，按统计表处理；{hint}"
         )
         return DataLayer(
             kind="table",

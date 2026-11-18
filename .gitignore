@@ -84,3 +84,11 @@ desktop.ini
 .opencode/
 .codeartsdoer/
 .arts/
+
+# 统计数据：联网/API 取回后的本地缓存（文件名带 8 位日期）不进仓库；
+# 预置数据集（如 320000_gdp_2025q3.csv）仍然提交。
+src/mapsmith/demo_data/stats/*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].csv
+
+# 边界：联网取回后的本地缓存不进仓库（徐州/广州的预置边界已入库，不受影响）。
+src/mapsmith/demo_data/boundaries/*.json
+

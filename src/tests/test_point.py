@@ -255,11 +255,11 @@ def test_render_unimplemented_map_type_raises() -> None:
     plt.close("all")
 
 
-def test_render_legends_and_north_arrow_inside_frame() -> None:
-    """回归防护：图例与指北针叠加在图内角落，必须完整落在图框内（不被裁）。
+def test_render_legends_stay_outside_map_but_inside_figure() -> None:
+    """回归防护：图例放在轴框外的右侧留白列，既不压地图，也不能被画布裁掉。
 
-    改版背景：早先把图例/指北针放图框外，导致画幅被迫让位、地图缩到 60% 宽，
-    且框外图例会被 bbox_inches="tight" 裁掉。现改为叠加在图内空白角落。
+    改版背景：早先把图例叠在轴内右上角，杭州这类站点集中东北城区的图，图例
+    会直接盖住站点名与色块；现改为轴外留白列，并为此把画布宽度加宽。
     """
     render_point(make_point_spec(), make_point_gdf([30, 45, 55, 65, 80]))
     fig = plt.gcf()
@@ -267,13 +267,15 @@ def test_render_legends_and_north_arrow_inside_frame() -> None:
     ax = fig.axes[0]
     renderer = fig.canvas.get_renderer()
     ax_box = ax.get_window_extent(renderer)
+    fig_box = fig.get_window_extent(renderer)
 
     legends = _legends(ax)
     assert len(legends) == 2
     for legend in legends:
         box = legend.get_window_extent(renderer)
-        assert ax_box.padded(3).contains(box.x0, box.y0), "图例左/下边越出图框"
-        assert ax_box.padded(3).contains(box.x1, box.y1), "图例右/上边越出图框"
+        assert box.x0 >= ax_box.x1 - 1, "图例压住了地图"
+        assert fig_box.padded(1).contains(box.x0, box.y0), "图例左/下边被画布裁掉"
+        assert fig_box.padded(1).contains(box.x1, box.y1), "图例右/上边被画布裁掉"
 
     n_texts = [t for t in ax.texts if t.get_text() == "N"]
     assert n_texts

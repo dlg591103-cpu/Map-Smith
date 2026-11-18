@@ -12,7 +12,12 @@ from shapely.geometry import box
 
 from mapsmith.config import get_settings
 from mapsmith.io.models import DataError, FieldMissing
-from mapsmith.tools.load_layer import load_admin, load_air
+from mapsmith.tools.load_layer import (
+    load_admin,
+    load_air,
+    load_preset_stats,
+    preset_stat_key,
+)
 from mapsmith.tools.resolve_place import PlaceResult
 
 STATIONS = [
@@ -256,3 +261,31 @@ def test_hour_order_is_respected_for_last_observation(tmp_path) -> None:
 
     assert layer.meta["value_max"] == 80.0
 
+
+
+# --- 预置社会经济统计数据（2026-11-18）------------------------------------
+
+
+def test_preset_stat_key_maps_social_metrics() -> None:
+    assert preset_stat_key("GDP") == "gdp"
+    assert preset_stat_key("gdp") == "gdp"
+    assert preset_stat_key("人口") == "population"
+    assert preset_stat_key("PM2_5_24h") is None
+    assert preset_stat_key("") is None
+
+
+def test_load_preset_stats_reads_demo_dataset() -> None:
+    """demo_data/stats/320000_gdp_2025q3.csv 是真实的江苏 13 市 GDP。"""
+    loaded = load_preset_stats("320000", "gdp")
+    assert loaded is not None
+    frame, name = loaded
+    assert name.startswith("320000_gdp")
+    assert len(frame) == 13
+    assert "district" in frame.columns and "gdp" in frame.columns
+    assert float(frame["gdp"].max()) > 19000  # 苏州接近 2 万亿
+    assert float(frame["gdp"].min()) > 3000
+
+
+def test_load_preset_stats_returns_none_for_unknown_region() -> None:
+    assert load_preset_stats("999999", "gdp") is None
+    assert load_preset_stats("", "gdp") is None

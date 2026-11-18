@@ -25,10 +25,12 @@ from .render import render
 from .spec import (
     Annotation,
     Classification,
+    DataHealth,
     Extent,
     Layer,
     MapSpec,
     Palette,
+    RenderMeta,
 )
 from .tools.classify import classify
 from .tools.load_layer import load_admin, load_air
@@ -47,6 +49,41 @@ class RenderResult:
     png_path: Path | None = None
     pdf_path: Path | None = None
     report: Any = None
+
+
+def _render_meta_from(value: Any) -> RenderMeta | None:
+    """把界面/编排传进来的字体证据转成 RenderMeta；形状不对就当作没提供。"""
+    if isinstance(value, RenderMeta):
+        return value
+    if not isinstance(value, dict):
+        return None
+    fonts = value.get("font_sans_serif") or value.get("font.sans_serif") or []
+    if isinstance(fonts, str):
+        fonts = [fonts]
+    try:
+        return RenderMeta(
+            font_sans_serif=[str(item) for item in fonts if str(item).strip()],
+            unicode_minus=bool(value.get("unicode_minus", False)),
+        )
+    except ValidationError:
+        return None
+
+
+def _data_health_from(value: Any) -> DataHealth | None:
+    """缺失值统计（R10 依据）；拿不到就返回 None，让审查如实给 WARN。"""
+    if isinstance(value, DataHealth):
+        return value
+    if not isinstance(value, dict):
+        return None
+    raw = value.get("nan_count")
+    try:
+        nan_count = int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        nan_count = None
+    try:
+        return DataHealth(nan_count=nan_count, summary=str(value.get("summary") or ""))
+    except ValidationError:
+        return None
 
 
 def build_spec(fields: dict[str, Any]) -> MapSpec:
@@ -136,6 +173,8 @@ def build_spec(fields: dict[str, Any]) -> MapSpec:
             data_source_note=str(data_source_note),
             crs=str(fields.get("crs", "EPSG:4490")),
             notes=[str(item) for item in fields.get("notes", [])],
+            render_meta=_render_meta_from(fields.get("render_meta")),
+            data_health=_data_health_from(fields.get("data_health")),
         )
     except ValidationError as exc:
         # pydantic 的校验信息是英文且技术性强，这里转成面向用户的中文说明。
@@ -165,9 +204,17 @@ def resolve_inputs(
     *,
     online: bool = False,
 ) -> tuple[DataLayer, DataLayer]:
-    """从 demo_data 载入行政边界与站点空气数据，返回 ``(admin_layer, point_layer)``。"""
+    """从 demo_data 载入行政边界与站点空气数据，返回 ``(admin_layer, point_layer)``。
+
+    省级取数：先取边界，把下辖各市名传给 `load_air`。quotsoft 的站点按地级市
+    归属，直接用省名匹配一个站都匹配不到（实测报错「站点列表中没有匹配「浙江省」」）。
+    """
     admin = load_admin(place, online=online)
-    point = load_air(place, date, field=field, online=online)
+    city_names: list[str] | None = None
+    if str(admin.meta.get("level") or "") == "province" and admin.gdf is not None:
+        if "name" in admin.gdf.columns:
+            city_names = [str(name) for name in admin.gdf["name"].dropna()]
+    point = load_air(place, date, field=field, online=online, city_names=city_names)
     return admin, point
 
 
