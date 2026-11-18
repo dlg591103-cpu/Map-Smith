@@ -179,6 +179,7 @@ async function submit(confirmCost = false): Promise<void> {
               {{ option.label }}
             </option>
           </select>
+          <p class="hint">叠加图要两张面数据，请先在「数据文件」上传一张面图层。</p>
         </div>
 
         <div class="field">

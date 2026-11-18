@@ -88,6 +88,33 @@ def _summary_of(loaded: Any) -> str:
     return str(getattr(loaded, "summary", ""))
 
 
+# 数据体检的结论句描述的是「渲染方式」，与用户显式选择的图种可能矛盾。
+_CONCLUSION_MARKERS = ("降级为", "使用 IDW 插值", "按面图层分级设色")
+
+
+def _align_summary_with_spec(notes: list[str], spec: Mapping[str, Any]) -> list[str]:
+    """让注记里的结论句与实际出图图种一致。
+
+    数据体检可能建议「降级为点图」，但用户显式选了 IDW、渲染器也确实出了插值面；
+    这时继续保留「降级为点图」会让人以为选错了。只在结论句与 `spec.map_type`
+    矛盾时截掉这一句，站数与覆盖度等体检数据照常保留。
+    """
+    if not notes:
+        return notes
+    spec_type = str(spec.get("map_type") or "")
+    if spec_type in ("", "point"):
+        return notes
+    first = notes[0]
+    for marker in _CONCLUSION_MARKERS:
+        index = first.find(marker)
+        if index > 0:
+            trimmed = first[:index].rstrip("。，,;； ")
+            if trimmed:
+                return [trimmed + "。", *notes[1:]]
+            break
+    return notes
+
+
 def _decision_of(loaded: Any) -> str | None:
     raw = loaded.get("decision") if isinstance(loaded, Mapping) else getattr(loaded, "decision", None)
     if raw is None:
@@ -210,6 +237,7 @@ def run(
             summary="制图失败",
         )
 
+    notes = _align_summary_with_spec(notes, spec)
     png: Path | None = None
     verdict: dict[str, Any] | None = None
     round_no = 0
