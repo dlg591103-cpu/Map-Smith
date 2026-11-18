@@ -875,6 +875,41 @@ def _reason_notes(loaded: Mapping[str, Any], map_type: str) -> list[str]:
     return lines
 
 
+def _core_bounds(
+    gdf: Any, *, iqr_factor: float = 1.5
+) -> tuple[float, float, float, float] | None:
+    """取「主体」的外包范围，排除远离主体的离群面。
+
+    典型场景：海南省下辖三沙市，其面覆盖南海诸岛（3.84°N~19.53°N），而海南岛
+    主体只占 18.15°N~20.17°N。直接用整体 bbox 会让图幅被拉大约 8 倍，海南岛缩成
+    一小块、整幅几乎全是空海域。
+
+    判定用 Tukey 离群点规则：各面中心到「中位中心」的距离超过 ``Q3 + 1.5×IQR``
+    才视为离群。这样海南的三沙（距离 8°+）会被剔除，而江苏/广东这种面本来就
+    分散的正常省份不会被误伤（距离都在 Q3+1.5IQR 之内）。
+    """
+    if gdf is None or len(gdf) <= 2:
+        return None
+    try:
+        bounds = gdf.geometry.bounds
+    except Exception:  # noqa: BLE001 - 几何异常时退回整体范围
+        return None
+    if bounds is None or len(bounds) == 0:
+        return None
+    center_x = (bounds["minx"] + bounds["maxx"]) / 2.0
+    center_y = (bounds["miny"] + bounds["maxy"]) / 2.0
+    mid_x, mid_y = center_x.median(), center_y.median()
+    distance = ((center_x - mid_x) ** 2 + (center_y - mid_y) ** 2) ** 0.5
+    q1, q3 = distance.quantile(0.25), distance.quantile(0.75)
+    threshold = q3 + iqr_factor * (q3 - q1)
+    keep = distance <= threshold
+    if int(keep.sum()) < 2 or int(keep.sum()) == len(gdf):
+        return None  # 没有离群面，交给调用方用整体范围
+    core = gdf[keep]
+    minx, miny, maxx, maxy = core.total_bounds
+    return (float(minx), float(miny), float(maxx), float(maxy))
+
+
 def _bbox_for(loaded: Mapping[str, Any], map_type: str) -> tuple[float, float, float, float] | None:
     layer = loaded["layer"]
     if map_type in {"choropleth", "overlay"}:
@@ -883,12 +918,19 @@ def _bbox_for(loaded: Mapping[str, Any], map_type: str) -> tuple[float, float, f
         # 第二图层落到图外，指北针也会压到面色块上（T25 复验）。
         admin = loaded.get("overlay_base") if map_type == "overlay" else loaded.get("admin")
         if admin is not None:
+            # 优先用「核心范围」：省域含远海岛礁（海南三沙）时避免图幅被拉散。
+            core = _core_bounds(admin.gdf) if admin.gdf is not None else None
+            if core is not None:
+                return core
             bbox = admin.bbox_wgs84()
             if bbox is not None:
                 return bbox
         return layer.bbox_wgs84()
     admin = loaded.get("admin")
     if admin is not None:
+        core = _core_bounds(admin.gdf) if admin.gdf is not None else None
+        if core is not None:
+            return core
         bbox = admin.bbox_wgs84()
         if bbox is not None:
             return bbox
