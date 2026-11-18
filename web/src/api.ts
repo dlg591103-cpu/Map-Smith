@@ -80,6 +80,26 @@ export async function health(): Promise<{ status: string; llm_configured: boolea
   return (await response.json()) as { status: string; llm_configured: boolean; version: string }
 }
 
+export interface StatsBalance {
+  configured: boolean
+  available?: boolean
+  points_balance?: number | null
+  data_points_cost?: number | null
+  access_validity_days?: number | null
+  daily_limit?: number | null
+  daily_used?: number | null
+}
+
+/** 聚汇账户余额（免费接口，不扣积分）；未配置 Key 时 configured=false。 */
+export async function fetchStatsBalance(): Promise<StatsBalance> {
+  try {
+    const response = await fetch('/api/stats/balance')
+    if (!response.ok) return { configured: false }
+    return (await response.json()) as StatsBalance
+  } catch {
+    return { configured: false }
+  }
+}
 // ---- 历史会话 ----
 
 export async function createSession(): Promise<SessionMeta> {

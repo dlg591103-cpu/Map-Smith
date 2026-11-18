@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { createSession, deleteSession, health, listSessions } from './api'
+import { createSession, deleteSession, fetchStatsBalance, health, listSessions } from './api'
 import type { SessionMeta } from './types'
 import ChatView from './components/ChatView.vue'
 import FormView from './components/FormView.vue'
 
 const view = ref<'chat' | 'form'>('chat')
 const llmConfigured = ref(false)
+// 聚汇余额：只在配置了统计数据 API Key 时显示，取数为 0 时提示「免费额度」。
+const statsBalance = ref<{ configured: boolean; available?: boolean; points_balance?: number | null }>({ configured: false })
 const chatKey = ref(0)
 const sessions = ref<SessionMeta[]>([])
 const currentSessionId = ref<string | null>(null)
@@ -74,6 +76,7 @@ onMounted(async () => {
   await loadSessions()
   try {
     llmConfigured.value = (await health()).llm_configured
+    statsBalance.value = await fetchStatsBalance()
   } catch {
     llmConfigured.value = false
   }
@@ -113,6 +116,9 @@ onMounted(async () => {
       </div>
 
       <div class="hint">模型：{{ llmConfigured ? '已配置' : '未配置' }}</div>
+      <div v-if="statsBalance.configured" class="hint">
+        数据积分：{{ statsBalance.available ? (statsBalance.points_balance ?? 0) : '—' }}
+      </div>
     </aside>
 
     <main class="main">

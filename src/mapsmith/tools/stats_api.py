@@ -444,3 +444,14 @@ def fetch_county_stats(
     unit_text = f"（单位：{unit}）" if unit else ""
     source = f"聚汇数据开放API「{city_bare}各区县{label}」{period}{unit_text}"
     return frame, source
+
+
+def fetch_account_balance() -> dict[str, Any] | None:
+    """查聚汇账户余额与额度（免费接口，不扣积分）。
+
+    返回 ``{points_balance, data_points_cost, access_validity_days,
+    daily_limit, daily_used, qps_limit}``；未配置 Key 或请求失败返回 None。
+    """
+    if not stats_api_key():
+        return None
+    return _get("/me")

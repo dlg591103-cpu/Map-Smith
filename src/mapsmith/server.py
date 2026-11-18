@@ -167,6 +167,31 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "llm_configured": configured(_settings()), "version": APP_VERSION}
 
 
+@app.get("/api/stats/balance")
+def stats_balance() -> dict[str, Any]:
+    """聚汇账户余额与额度（免费接口）。
+
+    只读、不扣积分；未配置 `MAPSMITH_STATS_API_KEY` 时返回 ``configured: false``，
+    前端据此决定是否显示余额。
+    """
+    from .tools.stats_api import fetch_account_balance, stats_api_key
+
+    if not stats_api_key():
+        return {"configured": False}
+    data = fetch_account_balance()
+    if data is None:
+        return {"configured": True, "available": False}
+    return {
+        "configured": True,
+        "available": True,
+        "points_balance": data.get("points_balance"),
+        "data_points_cost": data.get("data_points_cost"),
+        "access_validity_days": data.get("access_validity_days"),
+        "daily_limit": data.get("daily_limit"),
+        "daily_used": data.get("daily_used"),
+    }
+
+
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
     name = Path(file.filename or "upload").name
