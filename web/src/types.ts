@@ -81,7 +81,11 @@ export interface FormState {
   overlay_op: string
 }
 
+// 指标选项分三组：空气质量（quotsoft 站点）、社会经济统计（聚汇榜单 / 预置
+// 数据集）、以及任意其它指标名（统计接口会动态搜索榜单 slug）。
+// 表单值直接作为 metric 提交，后端 `map_metric` + `resolve_metric_slug` 负责归一。
 export const FIELD_OPTIONS = [
+  // 空气质量
   'PM2_5_24h',
   'PM10_24h',
   'NO2_24h',
@@ -89,9 +93,20 @@ export const FIELD_OPTIONS = [
   'O3_8h_24h',
   'CO_24h',
   'AQI',
-  // 社会经济统计指标：走 demo_data/stats/ 的预置数据集（如江苏各市 GDP），
-  // 或配合上传的统计表使用。
+  // 社会经济统计（省级走免费榜单；市级需积分，界面会先确认）
   'GDP',
+  '人均GDP',
+  '人口',
+  '城镇化率',
+  '财政收入',
+  '财政支出',
+  '税收收入',
+  '进出口总额',
+  '城镇居民可支配收入',
+  '医院床位数',
+  '小学生数量',
+  '初中生数量',
+  'CPI',
 ]
 
 export const MAP_TYPES = ['choropleth', 'point', 'idw', 'buffer', 'overlay']

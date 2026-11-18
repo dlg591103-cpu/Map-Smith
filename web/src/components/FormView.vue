@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { confirmCrs as confirmCrsApi, streamPost, uploadFile } from '../api'
 import type { CrsRequired, FormState, ResultPayload, UploadInfo } from '../types'
 import { FIELD_OPTIONS, MAP_TYPES, METHODS, PALETTES } from '../types'
@@ -68,7 +68,19 @@ async function confirmCrs(crs: string): Promise<void> {
   }
 }
 
-async function submit(): Promise<void> {
+/** 表单结果里「要花积分确认」的追问；有值时显示确认条。 */
+const costQuestion = computed(() => {
+  const questions = result.value?.questions || []
+  return questions.find((item) => String(item).includes('积分')) || ''
+})
+
+/** 余额不足时按钮改为「去充值」，避免反复点确认也买不到。 */
+const costShort = computed(() => costQuestion.value.includes('余额不足'))
+
+function openRecharge(): void {
+  window.open('https://www.gotohui.com/member/recharge', '_blank', 'noopener')
+}
+async function submit(confirmCost = false): Promise<void> {
   if (busy.value) return
   if (attachment.value?.crs_status === 'missing') {
     pendingCrs.value = crsInfo(attachment.value)
@@ -83,7 +95,7 @@ async function submit(): Promise<void> {
   try {
     await streamPost(
       '/api/form',
-      { ...form, upload_id: attachment.value?.upload_id || null },
+      { ...form, upload_id: attachment.value?.upload_id || null, confirm_cost: confirmCost },
       (event, data) => {
         if (event === 'stage') stage.value = String(data.label || data.stage || '处理中')
         else if (event === 'result') result.value = data as unknown as ResultPayload
@@ -116,8 +128,9 @@ async function submit(): Promise<void> {
           <input v-model="form.place" />
         </div>
         <div class="field">
-          <label>日期 YYYYMMDD</label>
-          <input v-model="form.time" />
+          <label>日期 / 年份</label>
+          <input v-model="form.time" placeholder="20261101 或 2025" />
+          <p class="hint">空气质量要完整日期（如 20261101）；GDP、人口等统计指标填年份即可（如 2025）。</p>
         </div>
 
         <div class="field">
@@ -194,6 +207,21 @@ async function submit(): Promise<void> {
       </div>
 
       <div v-if="error" class="error">{{ error }}</div>
+      <div v-if="costQuestion && !busy" class="cost-confirm">
+        <span class="cost-confirm-text">{{ costQuestion }}</span>
+        <button
+          v-if="costShort"
+          class="cost-confirm-btn"
+          type="button"
+          @click="openRecharge"
+        >
+          去充值
+        </button>
+        <button v-else class="cost-confirm-btn" type="button" @click="submit(true)">
+          确认购买
+        </button>
+      </div>
+
       <ResultCard v-if="result" :result="result" />
     </div>
 
