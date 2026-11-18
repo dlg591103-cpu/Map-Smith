@@ -165,9 +165,17 @@ def resolve_inputs(
     *,
     online: bool = False,
 ) -> tuple[DataLayer, DataLayer]:
-    """从 demo_data 载入行政边界与站点空气数据，返回 ``(admin_layer, point_layer)``。"""
+    """从 demo_data 载入行政边界与站点空气数据，返回 ``(admin_layer, point_layer)``。
+
+    省级取数：先取边界，把下辖各市名传给 `load_air`。quotsoft 的站点按地级市
+    归属，直接用省名匹配一个站都匹配不到（实测报错「站点列表中没有匹配「浙江省」」）。
+    """
     admin = load_admin(place, online=online)
-    point = load_air(place, date, field=field, online=online)
+    city_names: list[str] | None = None
+    if str(admin.meta.get("level") or "") == "province" and admin.gdf is not None:
+        if "name" in admin.gdf.columns:
+            city_names = [str(name) for name in admin.gdf["name"].dropna()]
+    point = load_air(place, date, field=field, online=online, city_names=city_names)
     return admin, point
 
 

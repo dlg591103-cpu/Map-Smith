@@ -32,12 +32,17 @@ from .agents.reviewer import review
 from .config import Settings, get_settings
 from .io.models import DataError, DataLayer, FieldMissing
 from .io.uploads import ensure_crs, parse_upload
-from .loop import FIELD_QUESTIONS, LoopResult
+from .loop import FIELD_QUESTIONS, LoopResult, NeedsConfirmation
 from .loop import run as loop_run
 from .spec import MapSpec
 from .tools.analyze import buffer_layer, buffer_metric_stats, clip_layer, overlay_layer
 from .tools.inspect import DataProfile, profile_points
-from .tools.load_layer import load_admin
+from .tools.load_layer import (
+    FIELD_ALIASES,
+    load_admin,
+    load_preset_stats,
+    preset_stat_key,
+)
 from .ui import (
     SUPPORTED_METHODS,
     aggregate_points_to_admin,
@@ -103,15 +108,42 @@ _TIME_PATTERNS = (
     re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日"),
 )
 
+# 缺年份的日期写法（「11月1日」「11/1」「11-01」）。用户口语里极常见，
+# 早先只认 4 位年份，导致「11月1日」永远解析为空、反复追问同一天。
+_PARTIAL_TIME_PATTERNS = (
+    re.compile(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]"),
+    re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})(?!\d)"),
+)
+
+# 统计类指标的年度 / 季度写法（「2025」「2025年」「2025Q3」「2025年第三季度」）。
+_QUARTER_PATTERN = re.compile(r"(\d{4})\s*[年\-]?\s*(?:第?([一二三四])\s*季度|[Qq]([1-4]))")
+_YEAR_ONLY_PATTERN = re.compile(r"^\s*(\d{4})\s*年?\s*$")
+
 
 def _allow_online() -> bool:
-    """是否允许联网取数。默认关闭（离线优先，演示稳定）。
+    """是否允许联网取数。**默认开启**，语义是「离线优先」：
 
-    设环境变量 ``MAPSMITH_ALLOW_ONLINE=1`` 时开启：本地 ``demo_data/`` 找不到
-    对应日期或边界时，才回落到 quotsoft / DataV 在线下载；联网失败仍抛出明确
-    错误（不伪造数据），不影响已缓存的离线日期。
+    - 本地 ``demo_data/`` 有该日期/边界 → 直接用本地，绝不联网；
+    - 本地没有 → 才回落到 quotsoft / DataV 在线下载（下载成功会落盘缓存）；
+    - 联网失败 → 抛明确错误，不伪造数据。
+
+    现场断网演示时设 ``MAPSMITH_OFFLINE=1`` 可强制离线，省去每次等待下载超时
+    （quotsoft 实测约 12 KB/s，1.5 MB 单日文件要两分钟左右，建议改用
+    ``warmup_data.py`` 提前预热）。
     """
-    raw = os.environ.get("MAPSMITH_ALLOW_ONLINE", "").strip().lower()
+    raw = os.environ.get("MAPSMITH_OFFLINE", "").strip().lower()
+    return raw not in {"1", "true", "yes", "on"}
+
+
+def _allow_online_stats_search() -> bool:
+    """是否允许「联网搜索统计数据」。默认关闭。
+
+    实测：免费搜索通道不可靠——Bing HTML 结果页只返回百科/政府首页，搜狗与百度
+    直连返回验证页，抓不到具体数据表。因此这条链路只作为实验性兜底，需要显式设
+    ``MAPSMITH_SEARCH_ONLINE=1`` 才启用；即使启用也做了地区名校验，抽不到可信
+    数据会明确报错而不是编数字。
+    """
+    raw = os.environ.get("MAPSMITH_SEARCH_ONLINE", "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -179,7 +211,11 @@ def _clean(value: Any) -> str:
 
 
 def normalize_time(value: Any) -> str:
-    """把常见日期写法归一为 `YYYY-MM-DD`；无法识别返回空串。"""
+    """把常见日期写法归一为 `YYYY-MM-DD`；无法识别返回空串。
+
+    缺年份的写法（「11月1日」「11/1」）补「今天所在年」——用户口语里几乎不会
+    带年份，早先只认 4 位年份会让这个字段永远解析失败、系统反复追问同一天。
+    """
     text = _clean(value)
     if not text:
         return ""
@@ -192,6 +228,24 @@ def normalize_time(value: Any) -> str:
             return datetime(year, month, day).date().isoformat()
         except ValueError:
             return ""
+    for pattern in _PARTIAL_TIME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        month, day = (int(part) for part in match.groups())
+        try:
+            return datetime(datetime.now().year, month, day).date().isoformat()
+        except ValueError:
+            return ""
+    # 统计类指标常用「年度 / 季度」口径：保留成 2025 或 2025Q3，不硬造具体日期。
+    quarter = _QUARTER_PATTERN.search(text)
+    if quarter:
+        year, raw_quarter = quarter.group(1), quarter.group(2) or quarter.group(3)
+        digits = {"一": "1", "二": "2", "三": "3", "四": "4"}
+        return f"{year}Q{digits.get(raw_quarter, raw_quarter)}"
+    year_only = _YEAR_ONLY_PATTERN.search(text)
+    if year_only:
+        return year_only.group(1)
     return ""
 
 
@@ -216,6 +270,11 @@ def normalize_parse(raw: Mapping[str, Any] | None) -> RequestParse:
         "metric": map_metric(data.get("metric")),
     }
     missing = [name for name in ("place", "time", "metric") if not request[name]]
+    # 社会经济统计类指标（GDP / 人均GDP / 人口 / 财政收入 …）本身就是年度或季度口径，
+    # 数据源只提供最新一期，不该要求用户给出「精确到某一天」。否则「山东各市人均GDP」
+    # 会被反复追问「要哪一天的数据」，而这个问题对统计口径没有意义。
+    if request["metric"] and not _is_air_quality_metric(request["metric"]):
+        missing = [name for name in missing if name != "time"]
 
     model_questions = [_clean(item) for item in (data.get("questions") or []) if _clean(item)]
     if not missing:
@@ -231,20 +290,41 @@ def normalize_parse(raw: Mapping[str, Any] | None) -> RequestParse:
     return RequestParse(request=request, questions=questions[:MAX_QUESTIONS], raw=data or None)
 
 
-def parse_request(text: str, llm_callable: Callable[[str, Mapping[str, Any]], Any]) -> RequestParse:
-    """一句话 → DataSteward prompt → `RequestParse`。"""
+def parse_request(
+    text: str,
+    llm_callable: Callable[[str, Mapping[str, Any]], Any],
+    history: list[str] | None = None,
+) -> RequestParse:
+    """一句话 → DataSteward prompt → `RequestParse`。
+
+    ``history`` 是同一话题下此前几轮用户说的原话（追问场景）。把它拼进
+    ``user_text`` 交给模型统一抽取，避免每轮只看到当前半句、把前面已经说过的
+    区域/时间/指标重新问一遍（多轮死循环）。
+    """
     if not _clean(text):
         return RequestParse(
             request={"place": "", "time": "", "metric": ""},
             questions=["请说一下区域、时间和指标，例如：徐州 2026-11-01 的 PM2.5。"],
         )
+    turns = [str(item).strip() for item in (history or []) if _clean(item)]
+    user_text = "\n".join([*turns, str(text).strip()]) if turns else str(text).strip()
     payload = {
-        "user_text": str(text).strip(),
+        "user_text": user_text,
+        "multi_turn": bool(turns),
         "known_fields": {"place": "", "time": "", "metric": ""},
         "output_schema": {
             "place": "区域名称，缺项填空字符串",
-            "time": "YYYY-MM-DD，缺项填空字符串",
-            "metric": "PM2.5 / PM10 / NO2 / SO2 / O3 / CO / AQI，缺项填空字符串",
+            "time": (
+                "日期或年份。空气质量类指标要 YYYY-MM-DD；社会经济统计类指标"
+                "（GDP / 人均GDP / 人口 / 财政收入 / 城镇化率等）只给年份也可以，"
+                "如 2025 或 2025年，照原文保留；完全没提时间才填空字符串"
+            ),
+            "metric": (
+                "指标名，照抄原文。可以是空气质量指标（PM2.5 / PM10 / NO2 / SO2 / O3 / "
+                "CO / AQI），也可以是社会经济统计指标（GDP / 人均GDP / 人口 / 财政收入 / "
+                "城镇化率 / CPI / 进出口总额 / 医院床位数 等）。**不要因为不是空气质量指标"
+                "就留空**"
+            ),
             "questions": ["仅当字段缺失时填写，最多两条；三项齐全时必须为 []"],
         },
         "format_instruction": "只返回一个 JSON 对象，不要 Markdown 表格、代码围栏或解释文字。",
@@ -265,10 +345,305 @@ def _numeric_columns(layer: DataLayer) -> list[str]:
     ]
 
 
+def _is_air_quality_metric(name: str) -> bool:
+    """判断指标是否是 quotsoft 能供的空气质量指标（PM2.5 / PM10 / AQI …）。
+
+    用于把「统计类指标」和「空气质量指标」分开：前者走统计数据源，
+    后者走 quotsoft 站点数据，不能互相抢路径。
+    """
+    mapped = map_metric(name)
+    return mapped in set(FIELD_ALIASES.values())
+
+
 def _require_field(layer: DataLayer, field_name: str) -> None:
+
     if layer.gdf is not None and field_name in layer.gdf.columns:
         return
     raise FieldMissing(field_name, _numeric_columns(layer))
+
+
+# 上传统计表时，用来猜「哪一列是行政区名」的列名线索。
+_TABLE_KEY_HINTS = (
+    "district",
+    "county",
+    "region",
+    "area",
+    "区县",
+    "地区",
+    "行政区",
+    "城市",
+    "名称",
+    "name",
+    "city",
+)
+# 猜「哪一列是数值」的列名线索（仅在多个数值列时用来消歧）。
+_TABLE_VALUE_HINTS = ("gdp", "人口", "population", "总量", "产值", "数值", "value", "指标")
+# 行政区名后缀：不同数据源常一边带、一边不带（「杭州市」↔「杭州」）。
+_ADMIN_SUFFIXES = ("特别行政区", "自治州", "地区", "省", "市", "盟", "区", "县")
+
+
+def _base_admin_name(name: Any) -> str:
+    """去掉行政区类型后缀，用于跨数据源的宽松名称匹配。"""
+    text = str(name or "").strip()
+    for suffix in _ADMIN_SUFFIXES:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return text[: -len(suffix)]
+    return text
+
+
+def _pick_table_key(stats: pd.DataFrame, boundary: Any) -> str | None:
+    """挑出统计表里能与边界 ``name`` 对上的行政区名列；匹配率需 ≥ 50%。
+
+    精确匹配优先；同时用去后缀的宽松匹配兜底（数据源常给「杭州」而边界是
+    「杭州市」），两种取较高者。
+    """
+    names: set[str] = set()
+    if boundary is not None and "name" in getattr(boundary, "columns", []):
+        names = {str(v).strip() for v in boundary["name"].dropna()}
+    if not names:
+        return None
+    names_base = {_base_admin_name(name) for name in names}
+
+    best_col: str | None = None
+    best_rate = 0.0
+    for column in stats.columns:
+        series = stats[column]
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+        values = {str(v).strip() for v in series.dropna()}
+        if not values:
+            continue
+        rate = len(values & names) / len(values)
+        rate_base = len({_base_admin_name(v) for v in values} & names_base) / len(values)
+        rate = max(rate, rate_base)
+        # 同分时优先列名含线索词的列
+        hinted = any(hint in str(column).lower() for hint in _TABLE_KEY_HINTS)
+        if rate > best_rate or (rate == best_rate and hinted and best_col is not None):
+            best_col, best_rate = str(column), rate
+    return best_col if best_rate >= 0.5 else None
+
+
+def _pick_table_value(
+    stats: pd.DataFrame, table_key: str, preferred: str
+) -> str | None:
+    """挑出统计表里的数值列：优先用户选的 ``preferred``，其次唯一的数值列，再按线索词。"""
+    numeric = [
+        str(c)
+        for c in stats.columns
+        if c != table_key and pd.api.types.is_numeric_dtype(stats[c])
+    ]
+    if not numeric:
+        return None
+    if preferred in numeric:
+        return preferred
+    if len(numeric) == 1:
+        return numeric[0]
+    for column in numeric:
+        if any(hint in column.lower() for hint in _TABLE_VALUE_HINTS):
+            return column
+    return numeric[0]
+
+
+def _join_upload_table(
+    layer: DataLayer, admin: DataLayer, preferred_field: str
+) -> tuple[DataLayer, str]:
+    """把上传的无几何统计表关联到行政区边界，返回 (面图层, 实际字段名)。
+
+    用于「上传一份区县 GDP / 人口 / 任何统计值 → 直接出分级设色图」。关联键与
+    数值列都自动识别并在摘要里写明；识别不出匹配率的行政区名列时明确报错，
+    不静默生成一张空图。
+    """
+    from .tools.analyze import join_table
+
+    stats = layer.table if layer.table is not None else layer.gdf
+    if stats is None or len(stats) == 0:
+        raise DataError(f"{layer.name} 没有可用的数据行，无法关联行政区")
+    boundary = admin.gdf
+    if boundary is None or "name" not in boundary.columns:
+        raise DataError(f"{admin.name} 缺少行政区名称列，无法关联统计表")
+
+    table_key = _pick_table_key(stats, boundary)
+    if table_key is None:
+        raise DataError(
+            f"{layer.name} 里找不到能对上行政区名称的列（需与边界的 name 列匹配 ≥50%）；"
+            f"可用列：{list(map(str, stats.columns))}"
+        )
+    value_col = _pick_table_value(stats, table_key, preferred_field)
+    if value_col is None:
+        raise DataError(
+            f"{layer.name} 除关联键 {table_key!r} 外没有数值列，无法分级设色；"
+            f"可用列：{list(map(str, stats.columns))}"
+        )
+
+    # 关联前把统计表的地区名规范化成边界里的标准写法：
+    # 数据源常给「广州」而边界是「广州市」，直接 merge 会一个都对不上。
+    base_to_admin = {_base_admin_name(name): str(name).strip() for name in boundary["name"]}
+    normalized = stats.copy()
+    join_key = "__mapsmith_join_key__"
+    normalized[join_key] = normalized[table_key].map(
+        lambda value: base_to_admin.get(_base_admin_name(value))
+    )
+    table_layer = DataLayer(
+        kind="table",
+        name=layer.name,
+        source=layer.source,
+        summary=layer.summary,
+        table=normalized,
+    )
+
+    joined = join_table(table_layer, admin, key=(join_key, "name"))
+    if joined.gdf is None:
+        raise DataError(f"{layer.name} 关联行政区后没有产生面图层")
+    if value_col not in joined.gdf.columns:
+        raise FieldMissing(value_col, _numeric_columns(joined))
+
+    matched = int(joined.gdf[value_col].notna().sum())
+    if matched == 0:
+        raise DataError(
+            f"{layer.name} 的 {table_key!r} 列与行政区名称没有任何匹配；"
+            f"边界名称示例：{sorted(set(map(str, boundary['name'])))[:5]}"
+        )
+    joined.summary = (
+        f"{joined.summary}自动关联：{table_key!r} ↔ 边界 name，数值列 {value_col!r}"
+        f"（匹配 {matched} 个面）。"
+    )
+    return joined, value_col
+
+
+def _cache_stats_frame(
+    frame: pd.DataFrame, adcode: str, stat_key: str
+) -> str:
+    """把联网取到的统计数据落盘到 demo_data/stats/，返回文件名。"""
+    stamp = time.strftime("%Y%m%d")
+    filename = f"{adcode}_{stat_key}_{stamp}.csv"
+    try:
+        target = get_settings().demo_data_dir / "stats" / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(target, index=False, encoding="utf-8-sig")
+    except OSError:
+        pass
+    return filename
+
+
+def _load_stats_from_api(
+    place: str,
+    field_name: str,
+    stat_key: str,
+    adcode: str,
+    admin_layer: DataLayer,
+    *,
+    metric_label: str = "",
+) -> tuple[pd.DataFrame, str] | None:
+    """用聚汇数据开放 API 的免费榜单取「某地区下辖各市/区县」的指标值。
+
+    ``stat_key`` 是榜单 slug 前缀（gdp / renkou / yshouru / chengzhen …）。
+    需要 ``MAPSMITH_STATS_API_KEY``；未配置或没匹配到榜单时返回 None。
+    只用免费的 ``/ranking`` 接口，不调用扣积分的 ``/data/{id}``。
+    """
+    from .tools.stats_api import fetch_region_stats, stats_api_key
+
+    if not stats_api_key():
+        return None
+    boundary = admin_layer.gdf
+    if boundary is None or "name" not in boundary.columns:
+        return None
+    names = {str(v).strip() for v in boundary["name"].dropna()}
+    if not names:
+        return None
+    try:
+        level = str(admin_layer.meta.get("level") or "")
+        got = fetch_region_stats(stat_key, level, names, metric_label=metric_label)
+    except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
+        return None
+    if got is None:
+        return None
+    frame, source = got
+    frame = frame.rename(columns={"value": stat_key})
+    filename = _cache_stats_frame(frame, adcode, stat_key)
+    return frame, f"{source}（已缓存 {filename}）"
+
+
+def _load_county_stats(
+    place: str,
+    field_name: str,
+    admin_layer: DataLayer,
+    *,
+    confirm: bool = False,
+) -> tuple[pd.DataFrame, str] | None:
+    """市级：取「该市下辖各区县」的某项指标。
+
+    聚汇的免费榜单只到地级市，区县级数据只能走「搜索指标 → 按 id 取数」，而取数
+    按「买断限期访问权限」计费（1 积分/指标 365 天）。因此行为分三种：
+
+    - 有积分且 ``confirm=True``：正常返回 ``(DataFrame, 来源说明)``；
+    - 需要用户确认（``confirm=False`` 或余额不足）：抛 `NeedsConfirmation`，
+      由编排层转成追问，把「要花几分、余额多少」告诉用户；
+    - 搜不到该指标：返回 None，由上层继续尝试其它路径。
+    """
+    from .tools.stats_api import fetch_county_stats, stats_api_key
+
+    if not stats_api_key():
+        return None
+    boundary = admin_layer.gdf
+    if boundary is None or "name" not in boundary.columns:
+        return None
+    county_names = [str(value).strip() for value in boundary["name"].dropna() if str(value).strip()]
+    if not county_names:
+        return None
+    try:
+        result = fetch_county_stats(
+            place, field_name, county_names, metric_label=field_name, confirm=confirm
+        )
+    except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
+        return None
+    if isinstance(result, dict):
+        # 报价：首次取数或余额不足时聚汇返回 need_authorization
+        quote = str(result.get("message") or "").strip()
+        cost = result.get("points_cost")
+        balance = result.get("points_balance")
+        kind = "余额不足" if isinstance(balance, int) and isinstance(cost, int) and balance < cost else "需确认"
+        raise NeedsConfirmation(
+            [
+                f"画「{place}各区县{field_name}」需要 {cost} 积分（{kind}，当前余额 {balance}）。"
+                "确认购买并继续吗？",
+            ],
+            summary=f"需要 {cost} 积分确认",
+            detail=quote or "聚汇数据返回需授权",
+        )
+    return result
+
+
+def _search_online_stats(
+    place: str,
+    field_name: str,
+    stat_key: str,
+    adcode: str,
+    admin_layer: DataLayer,
+) -> tuple[pd.DataFrame, str] | None:
+    """联网搜索统计数据（实验性，需 MAPSMITH_SEARCH_ONLINE=1）。
+
+    成功时把结果缓存到 ``demo_data/stats/``，之后同一地区走预置路径、不再联网。
+    失败返回 None，由调用方给出「没找到可信数据」的提示——不编数字。
+    """
+    from .tools.web_stats import fetch_online_stats
+
+    boundary = admin_layer.gdf
+    if boundary is None or "name" not in boundary.columns:
+        return None
+    names = {str(v).strip() for v in boundary["name"].dropna()}
+    if not names:
+        return None
+    try:
+        caller = default_llm_callable(settings=get_settings())
+        got = fetch_online_stats(place, stat_key, field_name, names, caller=caller)
+    except Exception:  # noqa: BLE001 - 实验性链路，任何异常都退化为「没搜到」
+        return None
+    if got is None:
+        return None
+    frame, source = got
+    frame = frame.rename(columns={"value": stat_key})
+    filename = _cache_stats_frame(frame, adcode, stat_key)
+    return frame, f"{source}（已缓存 {filename}）"
 
 
 def _surface_profile(layer: DataLayer, field_name: str) -> SurfaceProfile:
@@ -323,7 +698,12 @@ def _load_overlay_base(place: str) -> DataLayer | None:
         return None
 
 
-def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dict[str, Any]:
+def _load_layers(
+    request: Mapping[str, str],
+    upload: UploadRecord | None,
+    *,
+    confirm_cost: bool = False,
+) -> dict[str, Any]:
     place = request["place"]
     date = request["time"]
     field_name = request["metric"]
@@ -362,7 +742,98 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
                 "date": date,
                 "place": place,
             }
+        if layer.kind == "table":
+            # 上传一份「区县名 + 数值」的统计表（GDP / 人口 / 任何指标）→ 自动关联
+            # 行政区边界后出分级设色图，不需要用户先自己转成面图层。
+            admin = load_admin(place, online=_allow_online())
+            joined, actual_field = _join_upload_table(layer, admin, field_name)
+            profile = _surface_profile(joined, actual_field)
+            return {
+                "summary": profile.summary,
+                "decision": profile.decision,
+                "reason_lines": list(profile.reason_lines),
+                "profile": profile,
+                "admin": joined,
+                "overlay_base": _load_overlay_base(place),
+                "points": None,
+                "layer": joined,
+                "field": actual_field,
+                "date": date,
+                "place": place,
+            }
         raise DataError("统计表需要关联行政区后才能成图；请先转成点位或面图层再上传")
+
+    # --- 社会经济统计指标（GDP / 人口 / 财政收入 / 城镇化率 …）---
+    # 1) 先看内置映射（gdp / population）；
+    # 2) 若不是空气质量指标且配了聚汇 API Key，把任意指标名解析成榜单 slug 前缀。
+    stat_slug = preset_stat_key(field_name)
+    if stat_slug is None and not _is_air_quality_metric(field_name):
+        from .tools.stats_api import resolve_metric_slug, stats_api_key
+
+        if stats_api_key():
+            try:
+                stat_slug = resolve_metric_slug(field_name)
+            except Exception:  # noqa: BLE001 - 解析失败按「不是统计指标」处理
+                stat_slug = None
+
+    if stat_slug is not None:
+        admin_layer = load_admin(place, online=_allow_online())
+        level = str(admin_layer.meta.get("level") or "")
+        adcode = str(admin_layer.meta.get("adcode") or "")
+        preset = load_preset_stats(adcode, stat_slug)
+        if preset is None and level == "city":
+            # 市级边界下辖的是「区县」，而聚汇没有区县级榜单，只能走
+            # 「搜索指标 → 按 id 取数」；取数要 1 积分/指标（买断 365 天）。
+            preset = _load_county_stats(place, field_name, admin_layer, confirm=confirm_cost)
+        if preset is None and level != "city":
+            # 没有预置数据：配了聚汇数据 API Key 就用它（榜单接口免费），
+            # 命中后缓存到 demo_data/stats/，下次直接走预置路径。
+            preset = _load_stats_from_api(
+                place, field_name, stat_slug, adcode, admin_layer, metric_label=field_name
+            )
+        if preset is None and _allow_online_stats_search():
+            # 实验性兜底：显式开启 MAPSMITH_SEARCH_ONLINE=1 时才联网检索。
+            preset = _search_online_stats(place, field_name, stat_slug, adcode, admin_layer)
+        if preset is not None:
+            stats_df, stats_name = preset
+            table_layer = DataLayer(
+                kind="table",
+                name=stats_name,
+                # source 直接沿用带期次的说明（如「聚汇数据开放API…2025 年数据」或
+                # 「320000_gdp_2025q3.csv」），审查规则 R05 要求来源里带时间标记。
+                source=stats_name,
+                summary=f"{stats_name}：{len(stats_df)} 行统计值",
+                table=stats_df,
+            )
+            joined, actual_field = _join_upload_table(table_layer, admin_layer, field_name)
+            profile = _surface_profile(joined, actual_field)
+            return {
+                "summary": profile.summary,
+                "decision": profile.decision,
+                "reason_lines": list(profile.reason_lines),
+                "profile": profile,
+                "admin": joined,
+                "overlay_base": None,
+                "points": None,
+                "layer": joined,
+                "field": actual_field,
+                "date": date,
+                "place": place,
+            }
+        raise DataError(
+            f"{place} 没有可用的 {field_name} 统计数据（demo_data/stats/ 下没有预置文件，"
+            "聚汇数据 API 也没取到匹配榜单）。可以改为上传一份「行政区名 + 数值」的 CSV，"
+            "或先用其它指标（如 PM2.5）。"
+        )
+
+    # 走到这里说明指标既不是空气质量、也没解析出统计榜单。不能落到空气质量路径
+    # 上——那样会在加载后报「字段 X 不存在」这种看不懂的错误（用户实测过：
+    # 「小学生数量」没匹配到榜单，最后报的是可用字段是 AQI/CO/PM2.5）。
+    if field_name and not _is_air_quality_metric(field_name):
+        raise DataError(
+            f"「{field_name}」不是空气质量指标，也没有匹配到统计数据榜单。"
+            "可以改为上传一份「行政区名 + 数值」的 CSV，或换用空气质量指标（PM2.5 / AQI 等）。"
+        )
 
     admin, points = resolve_inputs(place, date, field_name, online=_allow_online())
     profile = profile_points(points, field_name=field_name, study_area=admin)
@@ -416,6 +887,22 @@ def _region_label(place: str) -> str:
     if re.search(r"(省|市|区|县|自治州|自治区|特别行政区|盟|旗)$", place):
         return place
     return place + "市"
+
+
+def _title_date(request_time: str, loaded: Mapping[str, Any]) -> str:
+    """标题用的时间标记：统计指标没有具体日期时，用数据源里的期次代替。
+
+    `run_one_sentence` 给统计指标补的是「最新」占位（数据源只给最新一期），
+    但审查规则 R01 要求标题含时间要素。这里从 `layer.source` 里提取年份
+    （如「…2025 年数据」「320000_gdp_2025q3.csv」），提到就用它。
+    """
+    text = _clean(request_time)
+    if text and re.search(r"\d{4}", text):
+        return text
+    layer = loaded.get("layer")
+    source = str(getattr(layer, "source", "") or "")
+    match = re.search(r"(20\d{2})", source)
+    return match.group(1) if match else text
 
 
 def _local_title(place: str, field_name: str, date: str) -> str:
@@ -476,6 +963,41 @@ def _reason_notes(loaded: Mapping[str, Any], map_type: str) -> list[str]:
     return lines
 
 
+def _core_bounds(
+    gdf: Any, *, iqr_factor: float = 1.5
+) -> tuple[float, float, float, float] | None:
+    """取「主体」的外包范围，排除远离主体的离群面。
+
+    典型场景：海南省下辖三沙市，其面覆盖南海诸岛（3.84°N~19.53°N），而海南岛
+    主体只占 18.15°N~20.17°N。直接用整体 bbox 会让图幅被拉大约 8 倍，海南岛缩成
+    一小块、整幅几乎全是空海域。
+
+    判定用 Tukey 离群点规则：各面中心到「中位中心」的距离超过 ``Q3 + 1.5×IQR``
+    才视为离群。这样海南的三沙（距离 8°+）会被剔除，而江苏/广东这种面本来就
+    分散的正常省份不会被误伤（距离都在 Q3+1.5IQR 之内）。
+    """
+    if gdf is None or len(gdf) <= 2:
+        return None
+    try:
+        bounds = gdf.geometry.bounds
+    except Exception:  # noqa: BLE001 - 几何异常时退回整体范围
+        return None
+    if bounds is None or len(bounds) == 0:
+        return None
+    center_x = (bounds["minx"] + bounds["maxx"]) / 2.0
+    center_y = (bounds["miny"] + bounds["maxy"]) / 2.0
+    mid_x, mid_y = center_x.median(), center_y.median()
+    distance = ((center_x - mid_x) ** 2 + (center_y - mid_y) ** 2) ** 0.5
+    q1, q3 = distance.quantile(0.25), distance.quantile(0.75)
+    threshold = q3 + iqr_factor * (q3 - q1)
+    keep = distance <= threshold
+    if int(keep.sum()) < 2 or int(keep.sum()) == len(gdf):
+        return None  # 没有离群面，交给调用方用整体范围
+    core = gdf[keep]
+    minx, miny, maxx, maxy = core.total_bounds
+    return (float(minx), float(miny), float(maxx), float(maxy))
+
+
 def _bbox_for(loaded: Mapping[str, Any], map_type: str) -> tuple[float, float, float, float] | None:
     layer = loaded["layer"]
     if map_type in {"choropleth", "overlay"}:
@@ -484,12 +1006,19 @@ def _bbox_for(loaded: Mapping[str, Any], map_type: str) -> tuple[float, float, f
         # 第二图层落到图外，指北针也会压到面色块上（T25 复验）。
         admin = loaded.get("overlay_base") if map_type == "overlay" else loaded.get("admin")
         if admin is not None:
+            # 优先用「核心范围」：省域含远海岛礁（海南三沙）时避免图幅被拉散。
+            core = _core_bounds(admin.gdf) if admin.gdf is not None else None
+            if core is not None:
+                return core
             bbox = admin.bbox_wgs84()
             if bbox is not None:
                 return bbox
         return layer.bbox_wgs84()
     admin = loaded.get("admin")
     if admin is not None:
+        core = _core_bounds(admin.gdf) if admin.gdf is not None else None
+        if core is not None:
+            return core
         bbox = admin.bbox_wgs84()
         if bbox is not None:
             return bbox
@@ -584,8 +1113,10 @@ def _map_type_hint(text: str) -> tuple[str, dict[str, Any]] | None:
 def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: Mapping[str, Any]) -> MapSpec:
     """把 Cartographer 的决策与本地确定性字段合成合法 MapSpec。"""
     place = request["place"]
-    date = request["time"]
-    field_name = request["metric"]
+    date = _title_date(request["time"], loaded)
+    # 字段名以「加载后实际拿到的字段」为准：统计指标（人均GDP → renjun）与空气质量
+    # （PM2.5 → PM2_5_24h）都会改名，直接用原话的指标名会报「字段不存在」。
+    field_name = _clean(str(loaded.get("field") or "")) or request["metric"]
     decision = str(loaded["decision"])
     draft_type = _clean(draft.get("map_type"))
 
@@ -644,7 +1175,11 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
 
     return build_spec(
         {
-            "title": _ensure_title(draft.get("title"), place, field_name, date),
+            # 标题用「用户说的指标名」（人均GDP），不用内部字段名（renjun）；
+            # 字段名只用于数据绑定（spec_field）。
+            "title": _ensure_title(
+                draft.get("title"), place, request["metric"] or field_name, date
+            ),
             "map_type": map_type,
             "adcode": loaded.get("admin", layer).meta.get("adcode"),
             "bbox": _bbox_for(loaded, map_type),
@@ -741,7 +1276,9 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
     request = parse.request
     place = request["place"]
     date = request["time"]
-    field_name = request["metric"]
+    # 字段名以「加载后实际拿到的字段」为准：上传统计表（如区县 GDP）时，关联后
+    # 的列名往往不同于表单里选的指标名（PM2_5_24h），用表单值会直接报字段不存在。
+    field_name = _clean(str(loaded.get("field") or "")) or request["metric"]
     layer = loaded["layer"]
     gdf = layer.gdf
     if gdf is None:
@@ -863,13 +1400,14 @@ def _make_load_fn(
     upload: UploadRecord | None,
     state: dict[str, Any],
     on_stage: Callable[[str], None] | None = None,
+    confirm_cost: bool = False,
 ) -> Callable:
     request = dict(parse.request)
     emit = on_stage or (lambda _stage: None)
 
     def load(_request: Mapping[str, Any]) -> dict[str, Any]:
         emit("loading")
-        loaded = _load_layers(request, upload)
+        loaded = _load_layers(request, upload, confirm_cost=confirm_cost)
         state["loaded"] = loaded
         return loaded
 
@@ -1020,7 +1558,8 @@ def _make_render_fn(
         map_spec = _to_mapspec(spec)
         gdf = _render_frame(map_spec, loaded)
         kwargs: dict[str, Any] = {}
-        if map_spec.map_type == "point" and loaded.get("admin") is not None:
+        if map_spec.map_type in {"point", "idw"} and loaded.get("admin") is not None:
+            # 点图用它画底图；IDW 还用它把插值色块裁到行政界内（否则只有站点凸包）。
             kwargs["background_gdf"] = loaded["admin"].gdf
         result = run_render(map_spec, gdf, out_dir, name="web_map", **kwargs)
         state["render"] = result
@@ -1054,6 +1593,7 @@ def _needs_input(parse: RequestParse, summary: str = "信息不足，需要先�
 def run_one_sentence(
     text: str,
     *,
+    history: list[str] | None = None,
     llm_callable: Callable[[str, Mapping[str, Any]], Any] | None = None,
     upload: UploadRecord | None = None,
     output_dir: Path | str | None = None,
@@ -1062,20 +1602,34 @@ def run_one_sentence(
     timeout: float | None = None,
     clock: Callable[[], float] | None = None,
     on_stage: Callable[[str, str], None] | None = None,
+    confirm_cost: bool = False,
 ) -> FlowRun:
-    """一句话 → 解析 → `loop.run`；缺项时直接反问，不加载数据。"""
+    """一句话 → 解析 → `loop.run`；缺项时直接反问，不加载数据。
+
+    ``history`` 是同一话题下此前几轮用户原话，用于把多轮追问补的字段合并起来
+    （见 `parse_request`）。
+    """
     current = settings or get_settings()
     emit = _make_emitter(on_stage)
     emit("parsing")
     caller = llm_callable or default_llm_callable(settings=current)
-    parse = parse_request(text, caller)
+    parse = parse_request(text, caller, history=history)
     if parse.questions:
         return _needs_input(parse)
+
+    # 社会经济统计指标（GDP / 人均GDP / 城镇化率 …）的数据源只给最新一期，
+    # 「具体某一天」对它没有意义。这里补一个「最新」占位，否则 loop 的
+    # missing_fields 会把它当成缺时间、反复追问「要哪一天的数据」。
+    request = dict(parse.request)
+    if request.get("metric") and not _is_air_quality_metric(request["metric"]):
+        if not request.get("time"):
+            request["time"] = "最新"
+    parse = RequestParse(request=request, questions=[], raw=parse.raw)
 
     state: dict[str, Any] = {}
     result = loop_run(
         parse.request,
-        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit),
+        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit, confirm_cost=confirm_cost),
         map_fn=_make_llm_map_fn(parse, llm_callable=caller, on_stage=emit, user_text=text),
         render_fn=_make_render_fn(
             state,
@@ -1100,6 +1654,7 @@ def run_form(
     timeout: float | None = None,
     clock: Callable[[], float] | None = None,
     on_stage: Callable[[str, str], None] | None = None,
+    confirm_cost: bool = False,
 ) -> FlowRun:
     """表单 → `loop.run`；不调用模型。"""
     current = settings or get_settings()
@@ -1117,7 +1672,7 @@ def run_form(
     state: dict[str, Any] = {}
     result = loop_run(
         request,
-        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit),
+        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit, confirm_cost=confirm_cost),
         map_fn=_make_form_map_fn(parse, form, on_stage=emit),
         render_fn=_make_render_fn(
             state,

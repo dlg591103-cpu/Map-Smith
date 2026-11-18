@@ -3,6 +3,6 @@
 本包只实现 SPEC V0.1 范围内的能力；产品设定以 `docs/facts/` 为准。
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = ["__version__", "agents", "kb", "tools"]

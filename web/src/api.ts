@@ -1,4 +1,4 @@
-import type { UploadInfo } from './types'
+import type { Message, SessionDetail, SessionMeta, UploadInfo } from './types'
 
 export class ApiError extends Error {}
 
@@ -6,6 +6,16 @@ async function readError(response: Response): Promise<string> {
   try {
     const body = await response.json()
     if (body && typeof body.detail === 'string') return body.detail
+    // FastAPI 的 422 校验错误 detail 是数组：[{loc, msg, type}]。
+    // 之前只认字符串，界面只能显示「请求失败（HTTP 422）」，看不到哪个字段错了。
+    if (body && Array.isArray(body.detail)) {
+      const parts = body.detail.map((item: unknown) => {
+        const entry = item as { loc?: unknown[]; msg?: string }
+        const where = Array.isArray(entry.loc) ? entry.loc.join('.') : ''
+        return `${where}: ${entry.msg || '校验失败'}`
+      })
+      if (parts.length) return parts.join('；')
+    }
     if (body && typeof body.message === 'string') return body.message
   } catch {
     // 非 JSON 错误体，回退到文本
@@ -78,4 +88,67 @@ export async function health(): Promise<{ status: string; llm_configured: boolea
   const response = await fetch('/api/health')
   if (!response.ok) throw new ApiError(await readError(response))
   return (await response.json()) as { status: string; llm_configured: boolean; version: string }
+}
+
+export interface StatsBalance {
+  configured: boolean
+  available?: boolean
+  points_balance?: number | null
+  data_points_cost?: number | null
+  access_validity_days?: number | null
+  daily_limit?: number | null
+  daily_used?: number | null
+}
+
+/** 聚汇账户余额（免费接口，不扣积分）；未配置 Key 时 configured=false。 */
+export async function fetchStatsBalance(): Promise<StatsBalance> {
+  try {
+    const response = await fetch('/api/stats/balance')
+    if (!response.ok) return { configured: false }
+    return (await response.json()) as StatsBalance
+  } catch {
+    return { configured: false }
+  }
+}
+// ---- 历史会话 ----
+
+export async function createSession(): Promise<SessionMeta> {
+  const response = await fetch('/api/sessions', { method: 'POST' })
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SessionMeta
+}
+
+export async function listSessions(): Promise<SessionMeta[]> {
+  const response = await fetch('/api/sessions')
+  if (!response.ok) throw new ApiError(await readError(response))
+  const body = (await response.json()) as { sessions?: SessionMeta[] }
+  return body.sessions ?? []
+}
+
+/** 会话还没落盘（刚新建、尚未发消息）时返回 null，调用方按空对话处理。 */
+export async function getSession(id: string): Promise<SessionDetail | null> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`)
+  if (response.status === 404) return null
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SessionDetail
+}
+
+export async function saveSession(
+  id: string,
+  messages: Message[],
+  title?: string,
+): Promise<SessionMeta> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, title: title ?? null }),
+  })
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SessionMeta
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  // 记录已不存在也当作删掉了，不必把 404 抛给用户。
+  if (!response.ok && response.status !== 404) throw new ApiError(await readError(response))
 }

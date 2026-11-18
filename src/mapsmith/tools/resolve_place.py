@@ -114,6 +114,15 @@ def _local_boundary_paths(adcode: str) -> list[Path]:
 
 
 def _bbox_from_geojson(text: str) -> tuple[float, float, float, float]:
+    """从一个边界 GeoJSON 文本算出外包矩形 [minx, miny, maxx, maxy]。
+
+    要同时兼容三种常见结构：
+    - 几何对象 `{"type": "Polygon", "coordinates": [...]}`
+    - 单个 Feature `{"type": "Feature", "geometry": {...}}`
+    - FeatureCollection `{"features": [{"geometry": {...}}, ...]}`（DataV 返回这种）
+    早先的遍历只看了 `coordinates` 与 `features`，漏了 `geometry` 这一层，
+    导致 DataV 的 FeatureCollection 被判定为「没有坐标」，联网取边界永远失败。
+    """
     try:
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -134,6 +143,7 @@ def _bbox_from_geojson(text: str) -> tuple[float, float, float, float]:
                 walk(item)
         elif isinstance(node, dict):
             walk(node.get("coordinates"))
+            walk(node.get("geometry"))
             for feature in node.get("features") or []:
                 walk(feature)
 

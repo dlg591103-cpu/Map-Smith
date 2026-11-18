@@ -273,3 +273,56 @@ def test_render_unimplemented_map_type_still_raises() -> None:
     with pytest.raises(NotImplementedError, match="尚未实现"):
         render(bogus, make_point_gdf([30, 45, 55]))
     plt.close("all")
+
+# --- 行政界裁剪 ---
+
+
+def test_geometry_path_builds_closed_rings() -> None:
+    """矢量裁剪路径：多面与洞都要转成闭合路径，用于把栅格裁到行政界。"""
+    from shapely.geometry import Polygon
+
+    from mapsmith.render.idw import _geometry_path
+
+    polygon = Polygon(
+        [(0, 0), (4, 0), (4, 4), (0, 4)],
+        holes=[[(1, 1), (1, 2), (2, 2), (2, 1)]],
+    )
+
+    path = _geometry_path(polygon)
+
+    assert path.vertices.shape[1] == 2
+    assert len(path.codes) == len(path.vertices)
+    assert path.vertices.shape[0] >= 8  # 外环 + 内环各自闭合
+
+
+def test_render_idw_with_background_crops_to_admin_area() -> None:
+    """给了行政面：色块裁到界内，报告里注明裁剪，着色面积小于纯凸包。"""
+    background = gpd.GeoDataFrame(
+        {"geometry": [box(116.4, 34.2, 117.0, 34.6)]}, crs="EPSG:4326"
+    )
+    gdf = make_point_gdf([30, 45, 55, 65, 80])
+
+    plain = render_idw(make_idw_spec(), gdf)
+    cropped = render_idw(make_idw_spec(), gdf, background_gdf=background)
+
+    # 有行政面：网格按行政界取范围、放开到界内全域，凸包外着色为推测值
+    assert cropped.extrapolated is True
+    assert plain.extrapolated is False
+    assert cropped.hull_area_km2 > 0
+    assert "外插推测值" in cropped.summary
+    assert "外插推测值" not in plain.summary
+    plt.close("all")
+
+
+def test_render_dispatches_idw_with_background() -> None:
+    """总入口不再丢弃 background_gdf（丢弃会得到与行政界无关的倾斜色块）。"""
+    background = gpd.GeoDataFrame(
+        {"geometry": [box(116.4, 34.2, 117.0, 34.6)]}, crs="EPSG:4326"
+    )
+
+    report = render(
+        make_idw_spec(), make_point_gdf([30, 45, 55, 65, 80]), background_gdf=background
+    )
+
+    assert "外插推测值" in report.summary
+    plt.close("all")

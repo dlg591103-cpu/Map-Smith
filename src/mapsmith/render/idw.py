@@ -22,6 +22,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 from scipy.interpolate import griddata
 from scipy.spatial import ConvexHull
@@ -30,6 +31,8 @@ from ..io.models import DataError
 from ..spec import MapSpec
 from .choropleth import _aspect_for, _transformed_extent
 from .layout import (
+    AQI_COLORS,
+    AQI_SCHEMES,
     LayoutReport,
     _place_labels_avoiding_overlap,
     apply_layout,
@@ -116,6 +119,24 @@ def _point_in_polygon(x: float, y: float, polygon: np.ndarray) -> bool:
     return inside
 
 
+def _geometry_path(geom: Any) -> Any:
+    """把 shapely 面几何转成 matplotlib Path（多面与洞都支持），用于裁剪栅格。"""
+    from matplotlib.path import Path
+
+    polygons = list(getattr(geom, "geoms", [geom]))
+    paths = []
+    for polygon in polygons:
+        if getattr(polygon, "geom_type", "") not in {"Polygon", "MultiPolygon"}:
+            continue
+        for ring in [polygon.exterior] + list(polygon.interiors):
+            coords = np.asarray(ring.coords, dtype=float)
+            if len(coords) >= 3:
+                paths.append(Path(coords, closed=True))
+    if not paths:
+        return Path(np.empty((0, 2)))
+    return Path.make_compound_path(*paths)
+
+
 @dataclass
 class IDWReport:
     """一次 IDW 出图的结果，供回显与测试核对。"""
@@ -127,6 +148,8 @@ class IDWReport:
     missing_points: int = 0
     crs: str = ""
     summary: str = ""
+    # 是否按行政界放开外插（凸包外着色为推测值）
+    extrapolated: bool = False
 
 
 def render_idw(
@@ -138,6 +161,7 @@ def render_idw(
     unit: str | None = None,
     out_path: str | Path | None = None,
     pdf_path: str | Path | None = None,
+    background_gdf: Any | None = None,
 ) -> IDWReport:
     """渲染一张 IDW 空间插值面图（不画坐标轴，版式要素由 `apply_layout` 补齐）。
 
@@ -145,6 +169,9 @@ def render_idw(
     - ``field`` 缺省取 spec 里 kind=idw 图层的 field。
     - IDW 在度量投影下计算，插值栅格转回输出 CRS 显示。
     - 只在站点凸包内插值，凸包外不着色。
+    - ``background_gdf`` 给定时，再与行政界求交并画浅灰底图：站点凸包常只覆盖
+      站点密集的那部分（如苏南沿江），单靠凸包会画出一块与行政区形状无关的倾斜
+      多边形；裁剪后色块落在行政界内，「无站点区域留白」的语义不变。
     - 缺测点（None / NaN）不参与插值，画灰色空心点。
     """
     if getattr(gdf, "crs", None) is None:
@@ -213,9 +240,31 @@ def render_idw(
     meas_y = np.asarray(frame_meas.geometry.y, dtype=float)[valid_mask]
     points_meas = np.column_stack([meas_x, meas_y])
 
-    minx_m, miny_m = meas_x.min(), meas_y.min()
-    maxx_m, maxy_m = meas_x.max(), meas_y.max()
-    # 微扩边界避免边缘像元刚好落在凸包外。
+    # 行政面先解析出来：它既是底图，也决定网格范围与掩膜。
+    background_spec = None
+    admin_meas = None
+    if background_gdf is not None and not getattr(background_gdf, "empty", True):
+        background_spec = (
+            background_gdf.to_crs(spec.crs)
+            if str(getattr(background_gdf, "crs", "")) != str(spec.crs)
+            else background_gdf
+        )
+        admin_meas = (
+            background_spec
+            if str(getattr(background_spec, "crs", "")) == str(measurement)
+            else background_spec.to_crs(measurement)
+        )
+
+    # 网格范围：默认按站点外接框；给了行政面就按行政界范围。只按站点取范围时，
+    # 外插也只能覆盖到站点外接框，省界内其余区域根本不在网格上，色块必然还是
+    # 一块贴着站点的斜多边形。
+    if admin_meas is not None:
+        minx_m, miny_m, maxx_m, maxy_m = (float(v) for v in admin_meas.total_bounds)
+    else:
+        minx_m, miny_m = float(meas_x.min()), float(meas_y.min())
+        maxx_m, maxy_m = float(meas_x.max()), float(meas_y.max())
+
+    # 微扩边界避免边缘像元刚好落在边界线上。
     pad = (maxx_m - minx_m) * 0.02
     minx_m -= pad
     miny_m -= pad
@@ -228,12 +277,17 @@ def render_idw(
 
     grid_z = _idw(points_meas, valid_vals, grid_x, grid_y, power=IDW_POWER)
     hull = _hull_mask(points_meas, grid_x, grid_y)
-    grid_z[~hull] = np.nan
 
     hull_area_m2 = float(
         (hull.sum()) * ((maxx_m - minx_m) / GRID_N) * ((maxy_m - miny_m) / GRID_N)
     )
     hull_area_km2 = hull_area_m2 / 1e6
+
+    # 掩膜：没有行政面时只画站点凸包；有行政面时全域外插，改由矢量省界裁剪
+    # （逐像元掩膜在省界处必然留下锯齿与缝隙，贴不住矢量边界）。
+    extrapolated = admin_meas is not None
+    if not extrapolated:
+        grid_z[~hull] = np.nan
 
     # --- 把栅格坐标从度量投影转回输出 CRS，用 imshow 显示 ---
     from pyproj import Transformer
@@ -241,17 +295,59 @@ def render_idw(
     transformer = Transformer.from_crs(measurement, spec.crs, always_xy=True)
     grid_x_out, grid_y_out = transformer.transform(grid_x, grid_y)
 
-    # imshow 需要规则网格的 extent；用输出 CRS 的 bbox。
-    extent_out = _transformed_extent(spec)
+    # imshow 的 extent 必须与栅格自身范围一致：网格是绕行政界外扩 2% 的，若仍用
+    # spec.extent.bbox，栅格会被压进图框，色块与底图省界之间出现错位缝隙。
+    extent_out = (
+        float(np.nanmin(grid_x_out)),
+        float(np.nanmin(grid_y_out)),
+        float(np.nanmax(grid_x_out)),
+        float(np.nanmax(grid_y_out)),
+    )
     minx_o, miny_o, maxx_o, maxy_o = extent_out
 
     fig, ax = plt.subplots(figsize=spec.layout.size)
 
+    # 用矢量行政界裁剪栅格：色块边缘严格贴合省界，不会出现逐像元掩膜的锯齿缝隙。
+    clip_patch = None
+    if extrapolated:
+        from matplotlib.patches import PathPatch
+
+        try:
+            admin_geom = background_spec.union_all()
+        except AttributeError:  # shapely < 2.0 或旧 geopandas
+            from shapely.ops import unary_union
+
+            admin_geom = unary_union(list(background_spec.geometry))
+        clip_patch = PathPatch(
+            _geometry_path(admin_geom),
+            transform=ax.transData,
+            facecolor="none",
+            edgecolor="none",
+        )
+        ax.add_patch(clip_patch)
+
+    if background_spec is not None:
+        # 浅灰行政底图：读者能看清色块落在行政区的哪一段，以及哪些区域没有站点。
+        background_spec.plot(
+            ax=ax, facecolor="#e9eef4", edgecolor="#c9d1da", linewidth=0.6, zorder=0
+        )
+
     # IDW 是连续插值面，用连续色阶渲染；图例用分级断点 Patch 做示意性标注。
-    cmap = plt.get_cmap(spec.palette.scheme)
+    # AQI 用国标六级色阶（AQI6 是自定义方案名、不是 matplotlib colormap），
+    # 直接 get_cmap("AQI6") 会抛 ValueError；这里把国标六级色插值成连续色阶。
+    scheme = spec.palette.scheme
+    if str(scheme).strip().lower() in AQI_SCHEMES:
+        cmap = LinearSegmentedColormap.from_list(
+            "aqi6_continuous", list(reversed(AQI_COLORS)) if spec.palette.reverse else list(AQI_COLORS)
+        )
+    else:
+        try:
+            cmap = plt.get_cmap(scheme)
+        except ValueError as exc:
+            raise DataError(f"未知配色方案 {scheme!r}") from exc
     vmin = float(np.nanmin(grid_z))
     vmax = float(np.nanmax(grid_z))
-    ax.imshow(
+    image = ax.imshow(
         grid_z,
         extent=(minx_o, maxx_o, miny_o, maxy_o),
         origin="lower",
@@ -261,6 +357,8 @@ def render_idw(
         aspect=_aspect_for(spec.crs, spec.extent.bbox),
         zorder=1,
     )
+    if clip_patch is not None:
+        image.set_clip_path(clip_patch)
 
     # --- 站点叠加 ---
     if missing_count > 0:
@@ -313,6 +411,8 @@ def render_idw(
     )
     if missing_count:
         summary += f"，缺测 {missing_count} 个站点未参与插值"
+    if extrapolated:
+        summary += "；色块按行政界裁剪，凸包外为外插推测值"
 
     return IDWReport(
         layout=layout,
@@ -322,4 +422,5 @@ def render_idw(
         missing_points=missing_count,
         crs=str(spec.crs),
         summary=summary,
+        extrapolated=extrapolated,
     )

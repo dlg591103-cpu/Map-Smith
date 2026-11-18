@@ -112,10 +112,39 @@ def test_normalize_time_accepts_common_formats():
     assert flow.normalize_time("2026年11月1日") == "2026-11-01"
 
 
+def test_normalize_time_accepts_year_less_dates():
+    """口语里「11月1日」不带年份很常见，必须补当年而不是留空。
+
+    早先只认 4 位年份，「11月1日」永远解析为空，系统会反复追问同一天。
+    """
+    year = flow.datetime.now().year  # noqa: SLF001 - 直接取模块里已导入的 datetime
+    assert flow.normalize_time("11月1日") == f"{year}-11-01"
+    assert flow.normalize_time("11月1号") == f"{year}-11-01"
+    assert flow.normalize_time("11/1") == f"{year}-11-01"
+    assert flow.normalize_time("11-01") == f"{year}-11-01"
+
+
 def test_normalize_time_rejects_unparseable_value():
     assert flow.normalize_time("最近几天") == ""
     assert flow.normalize_time(None) == ""
     assert flow.normalize_time("2026-02-30") == ""
+
+
+def test_allow_online_defaults_on_and_offline_env_disables(monkeypatch):
+    """联网默认开启（离线优先语义），MAPSMITH_OFFLINE=1 才强制离线。
+
+    「离线优先」指本地有数据就绝不联网，只有本地缺该日期/边界时才回落下载；
+    与之配套的关闭开关是 MAPSMITH_OFFLINE，不是旧的 MAPSMITH_ALLOW_ONLINE。
+    """
+    monkeypatch.delenv("MAPSMITH_OFFLINE", raising=False)
+    assert flow._allow_online() is True
+
+    for value in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("MAPSMITH_OFFLINE", value)
+        assert flow._allow_online() is False
+
+    monkeypatch.setenv("MAPSMITH_OFFLINE", "0")
+    assert flow._allow_online() is True
 
 
 def test_map_metric_maps_aliases_and_keeps_unknown():
@@ -187,6 +216,43 @@ def test_parse_request_empty_text_asks_without_calling_model():
     assert parsed.questions
 
 
+def test_parse_request_merges_history_into_user_text():
+    """多轮追问：之前的原话要拼进 user_text，否则模型每轮只看半句、反复追问。
+
+    复现路径：先说「徐州 pm2.5 分布图」（缺时间）→ 追问 → 再说「11月1日」。
+    若不带 history，模型只看到「11月1日」，会重新问区域与指标，形成死循环。
+    """
+    captured: dict = {}
+
+    def fake_llm(system_prompt: str, payload):
+        captured["payload"] = payload
+        return {"place": "徐州", "time": "11月1日", "metric": "PM2.5"}
+
+    parsed = flow.parse_request(
+        "11月1日",
+        fake_llm,
+        history=["徐州 pm2.5 分布图"],
+    )
+
+    assert captured["payload"]["multi_turn"] is True
+    assert captured["payload"]["user_text"] == "徐州 pm2.5 分布图\n11月1日"
+    assert parsed.questions == []
+    # 「11月1日」缺年份也要解析出日期（补当年）
+    assert parsed.request["time"].endswith("-11-01")
+
+
+def test_parse_request_without_history_keeps_single_turn():
+    captured: dict = {}
+
+    def fake_llm(system_prompt: str, payload):
+        captured["payload"] = payload
+        return {"place": "徐州", "time": "20261101", "metric": "PM2.5"}
+
+    flow.parse_request("徐州 20261101 的 PM2.5", fake_llm)
+    assert captured["payload"]["multi_turn"] is False
+    assert "\n" not in captured["payload"]["user_text"]
+
+
 # --- 制图 -----------------------------------------------------------------
 
 
@@ -223,9 +289,26 @@ def test_compose_spec_uses_idw_when_decision_is_idw():
 
 
 def test_compose_spec_raises_field_missing():
+    """loaded 指向的字段在数据里不存在时仍要抛 FieldMissing。
+
+    2026-11-18 起字段名以 loaded["field"]（加载后实际列名）为准，所以这条保护
+    改成「loaded 的 field 与实际列不一致」来验证；request.metric 的原文只用于标题。
+    """
     loaded = make_loaded()
+    loaded["field"] = "NO2_24h"  # 数据列里没有这一项
     with pytest.raises(FieldMissing):
-        flow._compose_spec(request(metric="NO2_24h"), loaded, {})
+        flow._compose_spec(request(), loaded, {})
+
+
+def test_compose_spec_uses_loaded_field_for_binding_but_metric_in_title():
+    """统计指标场景：数据绑定用实际列名，标题保留用户说的指标名。"""
+    loaded = make_loaded()
+    loaded["field"] = "renjun"  # 假想：统计 API 返回的列名
+    count = len(loaded["layer"].gdf)
+    loaded["layer"].gdf["renjun"] = [100.0 + i * 10 for i in range(count)]
+    spec = flow._compose_spec(request(metric="人均GDP", time="2025"), loaded, {})
+    assert spec.layers[0].field == "renjun"
+    assert "人均GDP" in spec.title
 
 
 def test_form_spec_rejects_mismatched_layer_type():
@@ -426,7 +509,7 @@ def test_form_spec_rejects_overlay_without_face_layer():
 def test_run_form_goes_through_loop(monkeypatch, tmp_path: Path):
     loaded = make_loaded()
     fake_render = FakeRender(tmp_path)
-    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload: loaded)
+    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload, **_kwargs: loaded)
     monkeypatch.setattr(flow, "run_render", fake_render)
 
     run = flow.run_form(
@@ -453,7 +536,7 @@ def test_run_form_goes_through_loop(monkeypatch, tmp_path: Path):
 def test_run_one_sentence_parses_then_runs_loop(monkeypatch, tmp_path: Path):
     loaded = make_loaded()
     fake_render = FakeRender(tmp_path)
-    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload: loaded)
+    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload, **_kwargs: loaded)
     monkeypatch.setattr(flow, "run_render", fake_render)
 
     calls: list[str] = []
@@ -486,7 +569,7 @@ def test_run_one_sentence_parses_then_runs_loop(monkeypatch, tmp_path: Path):
 
 def test_run_one_sentence_missing_field_returns_questions_without_loading(monkeypatch):
     loaded_calls: list[int] = []
-    monkeypatch.setattr(flow, "_load_layers", lambda *_args: loaded_calls.append(1) or make_loaded())
+    monkeypatch.setattr(flow, "_load_layers", lambda *_args, **_kwargs: loaded_calls.append(1) or make_loaded())
 
     def fake_llm(system_prompt: str, payload):
         return {"place": "徐州"}
@@ -500,7 +583,7 @@ def test_run_one_sentence_missing_field_returns_questions_without_loading(monkey
 
 def test_run_one_sentence_reject_returns_needs_input(monkeypatch, tmp_path: Path):
     loaded = make_loaded("reject")
-    monkeypatch.setattr(flow, "_load_layers", lambda *_args: loaded)
+    monkeypatch.setattr(flow, "_load_layers", lambda *_args, **_kwargs: loaded)
     monkeypatch.setattr(flow, "run_render", FakeRender(tmp_path))
 
     def fake_llm(system_prompt: str, payload):
@@ -740,3 +823,90 @@ def test_ensure_title_requires_region_suffix_for_r01():
     )
     kept = "徐州市 PM2.5 分布图（2026-11-01，μg/m³）"
     assert flow._ensure_title(kept, "徐州", "PM2_5_24h", "2026-11-01") == kept
+
+# --- 上传统计表自动关联行政区（2026-11-18）--------------------------------
+
+
+def _admin_layer_4_districts():
+    """4 个方形区县，name 列用于关联。"""
+    import pandas as pd
+    from mapsmith.io.models import DataLayer
+
+    gdf = gpd.GeoDataFrame(
+        {"name": ["鼓楼区", "云龙区", "泉山区", "铜山区"], "adcode": [320302, 320303, 320311, 320312]},
+        geometry=[box(117.0, 34.2, 117.1, 34.3), box(117.1, 34.2, 117.2, 34.3),
+                  box(117.2, 34.2, 117.3, 34.3), box(117.3, 34.2, 117.4, 34.3)],
+        crs="EPSG:4326",
+    )
+    return DataLayer(kind="admin", name="测试边界", source="test", summary="4 面", gdf=gdf)
+
+
+def test_pick_table_key_finds_district_column():
+    import pandas as pd
+
+    stats = pd.DataFrame({"district": ["鼓楼区", "云龙区"], "gdp": [1.0, 2.0]})
+    admin = _admin_layer_4_districts()
+    assert flow._pick_table_key(stats, admin.gdf) == "district"
+
+
+def test_pick_table_key_returns_none_when_no_match():
+    import pandas as pd
+
+    stats = pd.DataFrame({"city": ["南京", "无锡"], "gdp": [1.0, 2.0]})
+    admin = _admin_layer_4_districts()
+    assert flow._pick_table_key(stats, admin.gdf) is None
+
+
+def test_pick_table_value_prefers_form_field_then_sole_numeric():
+    import pandas as pd
+
+    stats = pd.DataFrame({"district": ["a", "b"], "gdp": [1.0, 2.0], "population": [3.0, 4.0]})
+    # 表单选的指标不在表里 → 按线索词挑到 gdp
+    assert flow._pick_table_value(stats, "district", "PM2_5_24h") == "gdp"
+    # 表单选的就是表里的列 → 直接用它
+    assert flow._pick_table_value(stats, "district", "population") == "population"
+    # 只有一个数值列时无歧义
+    solo = pd.DataFrame({"district": ["a"], "value": [1.0]})
+    assert flow._pick_table_value(solo, "district", "PM2_5_24h") == "value"
+
+
+def test_join_upload_table_produces_admin_layer_with_value():
+    import pandas as pd
+    from mapsmith.io.models import DataLayer
+
+    stats = pd.DataFrame({"district": ["鼓楼区", "云龙区"], "gdp": [520.5, 610.2]})
+    table = DataLayer(kind="table", name="gdp.csv", source="test", summary="2 行", table=stats)
+    admin = _admin_layer_4_districts()
+
+    joined, field = flow._join_upload_table(table, admin, "PM2_5_24h")
+
+    assert field == "gdp"
+    assert joined.kind == "admin"
+    assert joined.gdf is not None
+    assert int(joined.gdf["gdp"].notna().sum()) == 2
+    assert "自动关联" in joined.summary
+
+
+def test_join_upload_table_raises_when_no_admin_name_match():
+    import pandas as pd
+    from mapsmith.io.models import DataLayer
+
+    stats = pd.DataFrame({"district": ["不存在区", "另一个区"], "gdp": [1.0, 2.0]})
+    table = DataLayer(kind="table", name="bad.csv", source="test", summary="2 行", table=stats)
+    admin = _admin_layer_4_districts()
+
+    with pytest.raises(Exception):
+        flow._join_upload_table(table, admin, "PM2_5_24h")
+
+
+def test_allow_online_stats_search_defaults_off(monkeypatch):
+    """联网搜索统计数据是实验性能力，默认关闭（免费搜索通道实测不可靠）。"""
+    monkeypatch.delenv("MAPSMITH_SEARCH_ONLINE", raising=False)
+    assert flow._allow_online_stats_search() is False
+
+    for value in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("MAPSMITH_SEARCH_ONLINE", value)
+        assert flow._allow_online_stats_search() is True
+
+    monkeypatch.setenv("MAPSMITH_SEARCH_ONLINE", "0")
+    assert flow._allow_online_stats_search() is False

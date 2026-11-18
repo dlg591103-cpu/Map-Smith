@@ -226,3 +226,84 @@ def test_static_file_serves_built_asset(client, tmp_path: Path):
     asset = client.get("/app.js")
     assert asset.status_code == 200
     assert "console.log" in asset.text
+
+
+def test_session_crud_roundtrip(client):
+    created = client.post("/api/sessions")
+    assert created.status_code == 200
+    shell = created.json()
+    session_id = shell["id"]
+    assert shell["message_count"] == 0
+    # 新建的空会话不落盘，列表里不应出现空条目
+    assert client.get("/api/sessions").json()["sessions"] == []
+
+    saved = client.put(
+        f"/api/sessions/{session_id}",
+        json={"messages": [{"id": "a", "role": "user", "text": "徐州 PM2.5 分布图"}]},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["title"] == "徐州 PM2.5 分布图"
+    assert saved.json()["message_count"] == 1
+
+    listed = client.get("/api/sessions").json()["sessions"]
+    assert [item["id"] for item in listed] == [session_id]
+
+    loaded = client.get(f"/api/sessions/{session_id}")
+    assert loaded.status_code == 200
+    assert loaded.json()["messages"][0]["text"] == "徐州 PM2.5 分布图"
+
+    assert client.delete(f"/api/sessions/{session_id}").json() == {"ok": True}
+    assert client.get(f"/api/sessions/{session_id}").status_code == 404
+    assert client.get("/api/sessions").json()["sessions"] == []
+
+
+def test_session_rejects_bad_id_and_payload(client):
+    assert client.get("/api/sessions/s_bad-id").status_code == 404
+    assert client.delete("/api/sessions/s_bad-id").status_code == 404
+
+    session_id = client.post("/api/sessions").json()["id"]
+    bad = client.put(
+        f"/api/sessions/{session_id}",
+        json={"messages": [{"role": "system", "text": "不合法角色"}]},
+    )
+    assert bad.status_code == 400
+    assert "角色" in bad.json()["detail"]
+
+def test_form_body_accepts_numeric_buffer_km_and_bool_confirm_cost():
+    """回归防护：表单请求体的两个类型坑。
+
+    1. `buffer_km` 来自 `<input type="number">`，Vue 3 会转成数字；后端若只声明
+       `str`，整个请求会 422（用户实测踩到）。
+    2. `confirm_cost` 只接受布尔；模板写成 `@click="submit"` 时会把 MouseEvent
+       当参数传进去，序列化成对象后 422。
+    """
+    from mapsmith.server import FormBody
+
+    body = FormBody(
+        place="江苏",
+        time="20261101",
+        metric="城镇化率",
+        map_type="choropleth",
+        method="quantile",
+        n=5,
+        palette_scheme="YlOrRd",
+        buffer_km=5,
+        overlay_op="clip",
+        confirm_cost=False,
+    )
+    assert body.buffer_km == 5
+    assert body.confirm_cost is False
+
+    # 字符串形式的 buffer_km 也要能接受（表单未勾选/手填时）
+    assert FormBody(buffer_km="5").buffer_km == "5"
+
+
+def test_form_body_rejects_non_boolean_confirm_cost():
+    """confirm_cost 传对象必须被拒，而不是静默当成 truthy。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from mapsmith.server import FormBody
+
+    with pytest.raises(ValidationError):
+        FormBody(confirm_cost={})

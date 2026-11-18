@@ -3,14 +3,25 @@
 # 依据：docs/Spec/V0.1-专题制图智能体.md 第 6 节 T23（完成判定：容器可起）
 # 与 docs/facts/08-交付形态.md（评委不装 Python 也能运行，规避本机环境差异）。
 #
-# 构建：docker build -t mapsmith:v0.1.1 .
+# 构建（默认走官方源）：
+#   docker build -t mapsmith:v0.1.1 .
+#
+# 国内网络建议加两个 build-arg（Docker Hub 与 pypi.org 直连常超时）：
+#   docker build \
+#     --build-arg PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.12-slim \
+#     --build-arg PIP_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple \
+#     -t mapsmith:v0.1.1 .
+#
 # 运行：docker compose up（推荐）或
 #       docker run --rm -p 8501:8501 mapsmith:v0.1.1
 #
 # 镜像只包含运行所需内容：src/（源码、demo_data、字体）与 web/dist/（前端构建产物，
 # 无需 Node）。依赖按 src/requirements.lock 固定版本安装。
 
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -21,8 +32,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # 先拷锁文件安装依赖，命中层缓存：源码变动不会触发重装。
+# 锁文件里是 `包==版本`，换索引只影响下载来源，不影响最终版本。
 COPY src/requirements.lock /app/src/requirements.lock
-RUN python -m pip install -r /app/src/requirements.lock
+RUN python -m pip install -i "${PIP_INDEX_URL}" -r /app/src/requirements.lock
 
 COPY src/ /app/src/
 COPY web/dist/ /app/web/dist/

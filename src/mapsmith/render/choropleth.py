@@ -21,6 +21,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 from pyproj import CRS, Transformer
 
 from ..io.models import DataError
@@ -121,6 +122,78 @@ def _aspect_for(crs_text: str, bbox: tuple[float, float, float, float]) -> float
     return 1.0 / math.cos(math.radians(mid_lat))
 
 
+def _draw_inset_if_needed(
+    fig: Figure,
+    frame: Any,
+    colors: list[str],
+    spec: MapSpec,
+) -> Axes | None:
+    """主图范围外的要素画成右下角附图（如海南的南海诸岛）。
+
+    主图取景会聚焦主体（见 `flow._core_bounds`），像三沙这种远离主体的面会落到
+    图外。中国地图惯例要求这些区域以附图呈现，不能直接丢掉。
+
+    返回附图 axes；没有图外要素时返回 None。
+    """
+    try:
+        bounds = frame.geometry.bounds
+    except Exception:  # noqa: BLE001 - 几何异常就不画附图
+        return None
+    if bounds is None or len(bounds) == 0:
+        return None
+    minx, miny, maxx, maxy = _transformed_extent(spec)
+    eps = 1e-6
+    inside = (
+        (bounds["minx"] >= minx - eps)
+        & (bounds["maxx"] <= maxx + eps)
+        & (bounds["miny"] >= miny - eps)
+        & (bounds["maxy"] <= maxy + eps)
+    )
+    outlier_mask = [not bool(value) for value in inside]
+    if not any(outlier_mask):
+        return None
+    outliers = frame[outlier_mask]
+    outlier_colors = [color for color, keep in zip(colors, outlier_mask) if keep]
+    if len(outliers) == 0:
+        return None
+
+    inset = fig.add_axes([0.705, 0.035, 0.165, 0.22])
+    outliers.plot(ax=inset, color=outlier_colors, edgecolor=EDGE_COLOR, linewidth=0.3)
+    ob = outliers.total_bounds
+    pad_x = max((ob[2] - ob[0]) * 0.06, eps)
+    pad_y = max((ob[3] - ob[1]) * 0.06, eps)
+    inset.set_xlim(ob[0] - pad_x, ob[2] + pad_x)
+    inset.set_ylim(ob[1] - pad_y, ob[3] + pad_y)
+    # 与主图用同一套 aspect 规则：地理坐标系按纬度修正，投影坐标系保持等距。
+    inset.set_aspect(_aspect_for(spec.crs, spec.extent.bbox))
+    inset.set_axis_off()
+    inset.add_patch(
+        Rectangle(
+            (0, 0),
+            1,
+            1,
+            transform=inset.transAxes,
+            fill=False,
+            edgecolor="#888888",
+            linewidth=0.6,
+            zorder=10,
+        )
+    )
+    names = " ".join(str(name) for name in outliers.get("name", [])) if "name" in outliers.columns else ""
+    label = "南海诸岛" if ("三沙" in names or "南海" in names) else "图外区域"
+    inset.text(
+        0.03,
+        0.97,
+        label,
+        transform=inset.transAxes,
+        fontsize=7,
+        va="top",
+        ha="left",
+        color="#555555",
+    )
+    return inset
+
+
 def render_choropleth(
     spec: MapSpec,
     gdf: Any,
@@ -158,6 +231,9 @@ def render_choropleth(
     minx, miny, maxx, maxy = _transformed_extent(spec)
     ax.set_xlim(minx, maxx)
     ax.set_ylim(miny, maxy)
+
+    # 主图范围外的面（如海南的三沙远海岛礁）画成右下角附图，避免「只收束就丢区域」。
+    _draw_inset_if_needed(fig, frame, colors, spec)
 
     # 主体占满图幅，图例放到图框外右侧，避免压住面要素。
     # buffer 图按 SPEC 3.1 把半径与参与站点数写进图例副标题；文字取自 spec.notes，

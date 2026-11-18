@@ -403,19 +403,27 @@ def render_point(
     # 点图要表达「站点在行政区中的位置」，因此取景用完整行政区范围
     # （spec.extent.bbox），底图 10 个区县全显示；不再按站点分布收窄——收窄会让
     # 底图只剩城区几个区，观感上像「底图不全」。
-    # 画幅固定用 spec.layout.size（默认 10x8，横长），与网页卡片比例接近。
     content_bounds = None if frame.empty else tuple(float(v) for v in frame.total_bounds)
     aspect = _aspect_for(spec.crs, spec.extent.bbox)
     eminx, eminy, emaxx, emaxy = _transformed_extent(spec)
     minx, miny, maxx, maxy = eminx, eminy, emaxx, emaxy
 
-    # 边距（英寸）：图例与指北针叠加在图内空白角落，左右只留很小出图边距。
+    # 边距（英寸）：右侧单独留出图例区，图例画在轴外，不再叠在地图上压住站点名；
+    # 画布高度按地图真实宽高比反推，地图正好铺满图框，避免上下留大片空白。
     left_pad, right_pad = 0.18, 0.18
+    legend_pad = 2.60
     top_pad, bottom_pad = 0.45, 1.15
-    fig_w, fig_h = spec.layout.size
-    ax_w_in = max(fig_w - left_pad - right_pad, 2.0)
-    ax_h_in = max(fig_h - top_pad - bottom_pad, 2.0)
-    target_ratio = ax_w_in / ax_h_in  # 轴框像素宽高比 = 取景像素宽高比的目标
+    map_w_in = max(spec.layout.size[0] - left_pad - right_pad, 2.0)
+
+    dw = maxx - minx
+    dh = maxy - miny
+    map_ratio = (dw / (dh * aspect)) if (dw > 0 and dh > 0) else 1.25
+    ax_w_in = map_w_in
+    ax_h_in = max(ax_w_in / max(map_ratio, 0.05), 2.0)
+
+    fig_w = left_pad + ax_w_in + legend_pad + right_pad
+    fig_h = top_pad + ax_h_in + bottom_pad
+    target_ratio = ax_w_in / ax_h_in  # 与地图像素宽高比一致，下面的扩展逻辑只作兜底
 
     eminx, eminy, emaxx, emaxy = _transformed_extent(spec)
     dw = maxx - minx
@@ -565,26 +573,26 @@ def render_point(
         ]
         labels = [_fmt(v) for v in level_values]
         title = "气泡大小" + (f"（{unit}）" if unit else "")
-        # 图例叠加在图内右侧空白处（徐州这类图右上/右中是行政面无站点区域），
-        # 不再占用图框外空间，把画幅让给地图本身。
+        # 图例画在轴外右侧的专用留白里：内嵌到图内会压住站点名（杭州这类站点
+        # 集中在东北城区时尤其明显），移到框外后地图与图例互不遮挡。
         size_legend = ax.legend(
             handles=handles,
             labels=labels,
-            loc="upper right",
-            bbox_to_anchor=(0.965, 0.66),
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.62),
             title=title,
             framealpha=0.92,
         )
         ax.add_artist(size_legend)
 
     # --- 版式要素 + 断点图例 ---
-    # 图例与指北针都叠加在图内空白角落，画幅全部让给地图。
+    # 断点图例同样画在轴外右侧留白区，与气泡大小图例上下排布，不压地图。
     layout = apply_layout(
         fig,
         ax,
         spec,
         unit=unit,
-        legend_anchor=(0.965, 0.96),
+        legend_anchor=(1.02, 1.0),
         north_arrow_candidates=_POINT_NORTH_ARROW_CANDIDATES,
         extra_note=extra_note,
         # 保留颜色分级图例：点仍按分级着色，没有图例解释颜色会让读者看不懂；
