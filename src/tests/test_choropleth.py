@@ -193,3 +193,30 @@ def test_render_png_nonempty(tmp_path) -> None:
     render_choropleth(make_spec(), make_gdf([30, 45, 55, 65, 80]), out_path=out)
     assert out.exists() and out.stat().st_size > 10_000
     plt.close("all")
+
+
+def test_inset_drawn_when_face_outside_extent():
+    """主图范围外的面画成附图（海南三沙类场景），in-range 时不该多出 axes。"""
+    from shapely.geometry import box as _box
+
+    # 一个面在取景内，一个面远在南海（模拟三沙）
+    geoms = [_box(116.6, 34.2, 116.9, 34.5), _box(111.0, 8.0, 112.0, 9.0)]
+    gdf = gpd.GeoDataFrame({"pm25": [30.0, 45.0]}, geometry=geoms, crs="EPSG:4326")
+    spec = make_spec()
+    render_choropleth(spec, gdf)
+    fig = plt.gcf()
+    assert len(fig.axes) == 2, "有图外面时应多出一个附图 axes"
+    inset = fig.axes[1]
+    # 附图范围应覆盖离群面
+    x0, x1 = inset.get_xlim()
+    assert x0 < 111.5 < x1
+    plt.close("all")
+
+
+def test_no_inset_when_all_faces_inside_extent():
+    """所有面都在取景内时不画附图。"""
+    spec = make_spec()
+    render_choropleth(spec, make_gdf([30.0, 45.0, 60.0]))
+    fig = plt.gcf()
+    assert len(fig.axes) == 1
+    plt.close("all")
