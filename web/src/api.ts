@@ -1,4 +1,4 @@
-import type { UploadInfo } from './types'
+import type { Message, SessionDetail, SessionMeta, UploadInfo } from './types'
 
 export class ApiError extends Error {}
 
@@ -78,4 +78,47 @@ export async function health(): Promise<{ status: string; llm_configured: boolea
   const response = await fetch('/api/health')
   if (!response.ok) throw new ApiError(await readError(response))
   return (await response.json()) as { status: string; llm_configured: boolean; version: string }
+}
+
+// ---- 历史会话 ----
+
+export async function createSession(): Promise<SessionMeta> {
+  const response = await fetch('/api/sessions', { method: 'POST' })
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SessionMeta
+}
+
+export async function listSessions(): Promise<SessionMeta[]> {
+  const response = await fetch('/api/sessions')
+  if (!response.ok) throw new ApiError(await readError(response))
+  const body = (await response.json()) as { sessions?: SessionMeta[] }
+  return body.sessions ?? []
+}
+
+/** 会话还没落盘（刚新建、尚未发消息）时返回 null，调用方按空对话处理。 */
+export async function getSession(id: string): Promise<SessionDetail | null> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`)
+  if (response.status === 404) return null
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SessionDetail
+}
+
+export async function saveSession(
+  id: string,
+  messages: Message[],
+  title?: string,
+): Promise<SessionMeta> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, title: title ?? null }),
+  })
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SessionMeta
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  // 记录已不存在也当作删掉了，不必把 404 抛给用户。
+  if (!response.ok && response.status !== 404) throw new ApiError(await readError(response))
 }

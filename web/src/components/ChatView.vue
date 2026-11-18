@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { confirmCrs as confirmCrsApi, streamPost, uploadFile } from '../api'
+import { confirmCrs as confirmCrsApi, getSession, saveSession, streamPost, uploadFile } from '../api'
 import type { CrsRequired, Message, ResultPayload, UploadInfo } from '../types'
 import Composer from './Composer.vue'
 import CrsDialog from './CrsDialog.vue'
 import MessageBubble from './MessageBubble.vue'
 
-defineProps<{ llmConfigured: boolean }>()
-const emit = defineEmits<{ historyChanged: [] }>()
+const props = defineProps<{ llmConfigured: boolean; sessionId: string | null }>()
+const emit = defineEmits<{ sessionsChanged: [] }>()
 
 const messages = ref<Message[]>([])
 const busy = ref(false)
@@ -18,6 +18,9 @@ const lastRequest = ref<{ message: string; uploadId: string | null } | null>(nul
 // 追问期间累积的用户原话。后端把这些拼进解析上下文，避免「说了徐州又让说徐州」
 // 的死循环；出图成功或新建对话时清空。
 const pendingContext = ref<string[]>([])
+// 历史会话防抖保存：只在内容确实变化时落盘，避免加载后立刻回写一次。
+let saveTimer: number | undefined
+let lastSaved = ''
 
 const suggestions = [
   '徐州 2026-11-01 的 PM2.5 分布图',
@@ -45,13 +48,66 @@ function scrollToBottom(): void {
   })
 }
 
-function saveHistory(): void {
-  const recent = messages.value
+/** 只落盘展示字段：stage 是本次请求的进度，恢复后没有意义。 */
+function storedMessages(): Message[] {
+  return messages.value.map((message) => ({
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    error: message.error,
+    result: message.result,
+  }))
+}
+
+async function persist(): Promise<void> {
+  const id = props.sessionId
+  if (!id || !messages.value.length) return
+  const payload = storedMessages()
+  const key = JSON.stringify(payload)
+  if (key === lastSaved) return
+  try {
+    await saveSession(id, payload)
+    lastSaved = key
+    emit('sessionsChanged')
+  } catch {
+    // 保存失败不打断对话：下一次消息变化还会再试。
+  }
+}
+
+function scheduleSave(): void {
+  if (!props.sessionId || !messages.value.length) return
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => void persist(), 600)
+}
+
+/** 恢复会话时重建追问上下文：最后一条助手消息仍在提问时，
+ * 此前的用户原话要一并交给后端，否则重启后又得从头问一遍。 */
+function contextFrom(loaded: Message[]): string[] {
+  const last = [...loaded].reverse().find((message) => message.role === 'assistant')
+  if (!last?.result?.questions?.length) return []
+  return loaded
     .filter((message) => message.role === 'user')
-    .map((message) => message.text)
-    .slice(-20)
-  sessionStorage.setItem('mapsmith_history', JSON.stringify(recent))
-  emit('historyChanged')
+    .map((message) => String(message.text || '').split('\n📎')[0].trim())
+    .filter(Boolean)
+    .slice(-4)
+}
+
+async function loadSession(id: string): Promise<void> {
+  // 刚新建、还没落盘的会话会拿到 404，按空对话处理即可。
+  const data = await getSession(id).catch(() => null)
+  if (!data || !data.messages.length) return
+  messages.value = data.messages.map((item) =>
+    reactive<Message>({
+      id: item.id || newId(),
+      role: item.role,
+      text: item.text || '',
+      error: item.error,
+      result: item.result,
+    }),
+  )
+  pendingContext.value = contextFrom(data.messages)
+  lastSaved = JSON.stringify(storedMessages())
+  scrollToBottom()
 }
 
 function crsInfo(upload: UploadInfo): CrsRequired {
@@ -155,7 +211,7 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
     assistant.stage = undefined
     busy.value = false
     attachment.value = null
-    saveHistory()
+    scheduleSave()
     scrollToBottom()
   }
 }
@@ -166,6 +222,22 @@ function removeAttachment(): void {
 }
 
 watch(messages, scrollToBottom, { deep: true })
+// 一轮结束后才写盘：busy 期间消息还在流式变化，存中间态没有意义。
+watch(
+  messages,
+  () => {
+    if (!busy.value) scheduleSave()
+  },
+  { deep: true },
+)
+// 切换会话时组件会被重建，按目标 ID 载入历史；刚新建的空会话 404 视为空对话。
+watch(
+  () => props.sessionId,
+  (id) => {
+    if (id) void loadSession(id)
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   scrollToBottom()

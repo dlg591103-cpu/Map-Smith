@@ -226,3 +226,45 @@ def test_static_file_serves_built_asset(client, tmp_path: Path):
     asset = client.get("/app.js")
     assert asset.status_code == 200
     assert "console.log" in asset.text
+
+
+def test_session_crud_roundtrip(client):
+    created = client.post("/api/sessions")
+    assert created.status_code == 200
+    shell = created.json()
+    session_id = shell["id"]
+    assert shell["message_count"] == 0
+    # 新建的空会话不落盘，列表里不应出现空条目
+    assert client.get("/api/sessions").json()["sessions"] == []
+
+    saved = client.put(
+        f"/api/sessions/{session_id}",
+        json={"messages": [{"id": "a", "role": "user", "text": "徐州 PM2.5 分布图"}]},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["title"] == "徐州 PM2.5 分布图"
+    assert saved.json()["message_count"] == 1
+
+    listed = client.get("/api/sessions").json()["sessions"]
+    assert [item["id"] for item in listed] == [session_id]
+
+    loaded = client.get(f"/api/sessions/{session_id}")
+    assert loaded.status_code == 200
+    assert loaded.json()["messages"][0]["text"] == "徐州 PM2.5 分布图"
+
+    assert client.delete(f"/api/sessions/{session_id}").json() == {"ok": True}
+    assert client.get(f"/api/sessions/{session_id}").status_code == 404
+    assert client.get("/api/sessions").json()["sessions"] == []
+
+
+def test_session_rejects_bad_id_and_payload(client):
+    assert client.get("/api/sessions/s_bad-id").status_code == 404
+    assert client.delete("/api/sessions/s_bad-id").status_code == 404
+
+    session_id = client.post("/api/sessions").json()["id"]
+    bad = client.put(
+        f"/api/sessions/{session_id}",
+        json={"messages": [{"role": "system", "text": "不合法角色"}]},
+    )
+    assert bad.status_code == 400
+    assert "角色" in bad.json()["detail"]

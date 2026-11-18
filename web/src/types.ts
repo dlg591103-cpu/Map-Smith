@@ -54,6 +54,19 @@ export interface Message {
   crs?: CrsRequired
 }
 
+// 历史会话：meta 用于侧栏列表，detail 用于点开后恢复整段对话。
+export interface SessionMeta {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
+}
+
+export interface SessionDetail extends SessionMeta {
+  messages: Message[]
+}
+
 export interface FormState {
   place: string
   time: string

@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import flow
+from . import sessions as session_store
 from .agents.llm import LLMError, LLMNotConfigured, configured
 from .config import Settings, get_settings
 from .io.models import CrsNotDeclared, DataError, FieldMissing
@@ -63,6 +64,12 @@ class CrsBody(BaseModel):
     crs: str
 
 
+class SessionSaveBody(BaseModel):
+    # 前端把整段对话原样回传；只保留展示字段，校验在 sessions 模块里做。
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    title: str | None = None
+
+
 def _settings() -> Settings:
     return get_settings()
 
@@ -84,6 +91,11 @@ def _upload_record(upload_id: str | None) -> flow.UploadRecord | None:
     if record is None:
         raise DataError("上传记录不存在或已过期，请重新上传文件")
     return record
+
+
+def _sessions_root() -> Path:
+    """会话文件跟着产物目录走，容器挂载 out/ 时一起持久化。"""
+    return session_store.sessions_root(_settings().output_dir)
 
 
 def _crs_required_event(record: flow.UploadRecord) -> dict[str, Any]:
@@ -271,6 +283,50 @@ def form(body: FormBody) -> StreamingResponse:
         yield "result", _result_payload(run, request_id)
 
     return _stream(worker)
+
+
+@app.post("/api/sessions")
+def create_session() -> dict[str, Any]:
+    """新建会话只发一个 ID 空壳：没说话就不落盘，侧栏不会被空条目占满。"""
+    return session_store.empty_session(session_store.new_session_id())
+
+
+@app.get("/api/sessions")
+def list_sessions() -> dict[str, Any]:
+    return {"sessions": session_store.list_sessions(_sessions_root())}
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: str) -> dict[str, Any]:
+    try:
+        data = session_store.load_session(_sessions_root(), session_id)
+    except session_store.SessionError as exc:
+        # 非法 ID 与「不存在」对外不区分，避免暴露目录规则。
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if data is None:
+        raise HTTPException(status_code=404, detail="会话不存在或已删除")
+    return data
+
+
+@app.put("/api/sessions/{session_id}")
+def put_session(session_id: str, body: SessionSaveBody) -> dict[str, Any]:
+    try:
+        return session_store.save_session(
+            _sessions_root(), session_id, body.messages, title=body.title
+        )
+    except session_store.SessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str) -> dict[str, Any]:
+    try:
+        removed = session_store.delete_session(_sessions_root(), session_id)
+    except session_store.SessionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="会话不存在或已删除")
+    return {"ok": True}
 
 
 @app.get("/api/output/{request_id}/{filename}")
