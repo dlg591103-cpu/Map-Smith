@@ -806,3 +806,77 @@ def test_ensure_title_requires_region_suffix_for_r01():
     )
     kept = "徐州市 PM2.5 分布图（2026-11-01，μg/m³）"
     assert flow._ensure_title(kept, "徐州", "PM2_5_24h", "2026-11-01") == kept
+
+# --- 上传统计表自动关联行政区（2026-11-18）--------------------------------
+
+
+def _admin_layer_4_districts():
+    """4 个方形区县，name 列用于关联。"""
+    import pandas as pd
+    from mapsmith.io.models import DataLayer
+
+    gdf = gpd.GeoDataFrame(
+        {"name": ["鼓楼区", "云龙区", "泉山区", "铜山区"], "adcode": [320302, 320303, 320311, 320312]},
+        geometry=[box(117.0, 34.2, 117.1, 34.3), box(117.1, 34.2, 117.2, 34.3),
+                  box(117.2, 34.2, 117.3, 34.3), box(117.3, 34.2, 117.4, 34.3)],
+        crs="EPSG:4326",
+    )
+    return DataLayer(kind="admin", name="测试边界", source="test", summary="4 面", gdf=gdf)
+
+
+def test_pick_table_key_finds_district_column():
+    import pandas as pd
+
+    stats = pd.DataFrame({"district": ["鼓楼区", "云龙区"], "gdp": [1.0, 2.0]})
+    admin = _admin_layer_4_districts()
+    assert flow._pick_table_key(stats, admin.gdf) == "district"
+
+
+def test_pick_table_key_returns_none_when_no_match():
+    import pandas as pd
+
+    stats = pd.DataFrame({"city": ["南京", "无锡"], "gdp": [1.0, 2.0]})
+    admin = _admin_layer_4_districts()
+    assert flow._pick_table_key(stats, admin.gdf) is None
+
+
+def test_pick_table_value_prefers_form_field_then_sole_numeric():
+    import pandas as pd
+
+    stats = pd.DataFrame({"district": ["a", "b"], "gdp": [1.0, 2.0], "population": [3.0, 4.0]})
+    # 表单选的指标不在表里 → 按线索词挑到 gdp
+    assert flow._pick_table_value(stats, "district", "PM2_5_24h") == "gdp"
+    # 表单选的就是表里的列 → 直接用它
+    assert flow._pick_table_value(stats, "district", "population") == "population"
+    # 只有一个数值列时无歧义
+    solo = pd.DataFrame({"district": ["a"], "value": [1.0]})
+    assert flow._pick_table_value(solo, "district", "PM2_5_24h") == "value"
+
+
+def test_join_upload_table_produces_admin_layer_with_value():
+    import pandas as pd
+    from mapsmith.io.models import DataLayer
+
+    stats = pd.DataFrame({"district": ["鼓楼区", "云龙区"], "gdp": [520.5, 610.2]})
+    table = DataLayer(kind="table", name="gdp.csv", source="test", summary="2 行", table=stats)
+    admin = _admin_layer_4_districts()
+
+    joined, field = flow._join_upload_table(table, admin, "PM2_5_24h")
+
+    assert field == "gdp"
+    assert joined.kind == "admin"
+    assert joined.gdf is not None
+    assert int(joined.gdf["gdp"].notna().sum()) == 2
+    assert "自动关联" in joined.summary
+
+
+def test_join_upload_table_raises_when_no_admin_name_match():
+    import pandas as pd
+    from mapsmith.io.models import DataLayer
+
+    stats = pd.DataFrame({"district": ["不存在区", "另一个区"], "gdp": [1.0, 2.0]})
+    table = DataLayer(kind="table", name="bad.csv", source="test", summary="2 行", table=stats)
+    admin = _admin_layer_4_districts()
+
+    with pytest.raises(Exception):
+        flow._join_upload_table(table, admin, "PM2_5_24h")

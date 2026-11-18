@@ -307,6 +307,120 @@ def _require_field(layer: DataLayer, field_name: str) -> None:
     raise FieldMissing(field_name, _numeric_columns(layer))
 
 
+# 上传统计表时，用来猜「哪一列是行政区名」的列名线索。
+_TABLE_KEY_HINTS = (
+    "district",
+    "county",
+    "region",
+    "area",
+    "区县",
+    "地区",
+    "行政区",
+    "城市",
+    "名称",
+    "name",
+    "city",
+)
+# 猜「哪一列是数值」的列名线索（仅在多个数值列时用来消歧）。
+_TABLE_VALUE_HINTS = ("gdp", "人口", "population", "总量", "产值", "数值", "value", "指标")
+
+
+def _pick_table_key(stats: pd.DataFrame, boundary: Any) -> str | None:
+    """挑出统计表里能与边界 ``name`` 对上的行政区名列；匹配率需 ≥ 50%。"""
+    names: set[str] = set()
+    if boundary is not None and "name" in getattr(boundary, "columns", []):
+        names = {str(v).strip() for v in boundary["name"].dropna()}
+    if not names:
+        return None
+
+    best_col: str | None = None
+    best_rate = 0.0
+    for column in stats.columns:
+        series = stats[column]
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+        values = {str(v).strip() for v in series.dropna()}
+        if not values:
+            continue
+        rate = len(values & names) / len(values)
+        # 同分时优先列名含线索词的列
+        hinted = any(hint in str(column).lower() for hint in _TABLE_KEY_HINTS)
+        if rate > best_rate or (rate == best_rate and hinted and best_col is not None):
+            best_col, best_rate = str(column), rate
+    return best_col if best_rate >= 0.5 else None
+
+
+def _pick_table_value(
+    stats: pd.DataFrame, table_key: str, preferred: str
+) -> str | None:
+    """挑出统计表里的数值列：优先用户选的 ``preferred``，其次唯一的数值列，再按线索词。"""
+    numeric = [
+        str(c)
+        for c in stats.columns
+        if c != table_key and pd.api.types.is_numeric_dtype(stats[c])
+    ]
+    if not numeric:
+        return None
+    if preferred in numeric:
+        return preferred
+    if len(numeric) == 1:
+        return numeric[0]
+    for column in numeric:
+        if any(hint in column.lower() for hint in _TABLE_VALUE_HINTS):
+            return column
+    return numeric[0]
+
+
+def _join_upload_table(
+    layer: DataLayer, admin: DataLayer, preferred_field: str
+) -> tuple[DataLayer, str]:
+    """把上传的无几何统计表关联到行政区边界，返回 (面图层, 实际字段名)。
+
+    用于「上传一份区县 GDP / 人口 / 任何统计值 → 直接出分级设色图」。关联键与
+    数值列都自动识别并在摘要里写明；识别不出匹配率的行政区名列时明确报错，
+    不静默生成一张空图。
+    """
+    from .tools.analyze import join_table
+
+    stats = layer.table if layer.table is not None else layer.gdf
+    if stats is None or len(stats) == 0:
+        raise DataError(f"{layer.name} 没有可用的数据行，无法关联行政区")
+    boundary = admin.gdf
+    if boundary is None or "name" not in boundary.columns:
+        raise DataError(f"{admin.name} 缺少行政区名称列，无法关联统计表")
+
+    table_key = _pick_table_key(stats, boundary)
+    if table_key is None:
+        raise DataError(
+            f"{layer.name} 里找不到能对上行政区名称的列（需与边界的 name 列匹配 ≥50%）；"
+            f"可用列：{list(map(str, stats.columns))}"
+        )
+    value_col = _pick_table_value(stats, table_key, preferred_field)
+    if value_col is None:
+        raise DataError(
+            f"{layer.name} 除关联键 {table_key!r} 外没有数值列，无法分级设色；"
+            f"可用列：{list(map(str, stats.columns))}"
+        )
+
+    joined = join_table(layer, admin, key=(table_key, "name"))
+    if joined.gdf is None:
+        raise DataError(f"{layer.name} 关联行政区后没有产生面图层")
+    if value_col not in joined.gdf.columns:
+        raise FieldMissing(value_col, _numeric_columns(joined))
+
+    matched = int(joined.gdf[value_col].notna().sum())
+    if matched == 0:
+        raise DataError(
+            f"{layer.name} 的 {table_key!r} 列与行政区名称没有任何匹配；"
+            f"边界名称示例：{sorted(set(map(str, boundary['name'])))[:5]}"
+        )
+    joined.summary = (
+        f"{joined.summary}自动关联：{table_key!r} ↔ 边界 name，数值列 {value_col!r}"
+        f"（匹配 {matched} 个面）。"
+    )
+    return joined, value_col
+
+
 def _surface_profile(layer: DataLayer, field_name: str) -> SurfaceProfile:
     if layer.gdf is None:
         raise DataError(f"{layer.name} 没有几何，无法做面图层体检")
@@ -395,6 +509,25 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
                 "points": None,
                 "layer": layer,
                 "field": field_name,
+                "date": date,
+                "place": place,
+            }
+        if layer.kind == "table":
+            # 上传一份「区县名 + 数值」的统计表（GDP / 人口 / 任何指标）→ 自动关联
+            # 行政区边界后出分级设色图，不需要用户先自己转成面图层。
+            admin = load_admin(place, online=_allow_online())
+            joined, actual_field = _join_upload_table(layer, admin, field_name)
+            profile = _surface_profile(joined, actual_field)
+            return {
+                "summary": profile.summary,
+                "decision": profile.decision,
+                "reason_lines": list(profile.reason_lines),
+                "profile": profile,
+                "admin": joined,
+                "overlay_base": _load_overlay_base(place),
+                "points": None,
+                "layer": joined,
+                "field": actual_field,
                 "date": date,
                 "place": place,
             }
@@ -777,7 +910,9 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
     request = parse.request
     place = request["place"]
     date = request["time"]
-    field_name = request["metric"]
+    # 字段名以「加载后实际拿到的字段」为准：上传统计表（如区县 GDP）时，关联后
+    # 的列名往往不同于表单里选的指标名（PM2_5_24h），用表单值会直接报字段不存在。
+    field_name = _clean(str(loaded.get("field") or "")) or request["metric"]
     layer = loaded["layer"]
     gdf = layer.gdf
     if gdf is None:
