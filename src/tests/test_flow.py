@@ -289,9 +289,26 @@ def test_compose_spec_uses_idw_when_decision_is_idw():
 
 
 def test_compose_spec_raises_field_missing():
+    """loaded 指向的字段在数据里不存在时仍要抛 FieldMissing。
+
+    2026-11-18 起字段名以 loaded["field"]（加载后实际列名）为准，所以这条保护
+    改成「loaded 的 field 与实际列不一致」来验证；request.metric 的原文只用于标题。
+    """
     loaded = make_loaded()
+    loaded["field"] = "NO2_24h"  # 数据列里没有这一项
     with pytest.raises(FieldMissing):
-        flow._compose_spec(request(metric="NO2_24h"), loaded, {})
+        flow._compose_spec(request(), loaded, {})
+
+
+def test_compose_spec_uses_loaded_field_for_binding_but_metric_in_title():
+    """统计指标场景：数据绑定用实际列名，标题保留用户说的指标名。"""
+    loaded = make_loaded()
+    loaded["field"] = "renjun"  # 假想：统计 API 返回的列名
+    count = len(loaded["layer"].gdf)
+    loaded["layer"].gdf["renjun"] = [100.0 + i * 10 for i in range(count)]
+    spec = flow._compose_spec(request(metric="人均GDP", time="2025"), loaded, {})
+    assert spec.layers[0].field == "renjun"
+    assert "人均GDP" in spec.title
 
 
 def test_form_spec_rejects_mismatched_layer_type():

@@ -115,6 +115,10 @@ _PARTIAL_TIME_PATTERNS = (
     re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})(?!\d)"),
 )
 
+# 统计类指标的年度 / 季度写法（「2025」「2025年」「2025Q3」「2025年第三季度」）。
+_QUARTER_PATTERN = re.compile(r"(\d{4})\s*[年\-]?\s*(?:第?([一二三四])\s*季度|[Qq]([1-4]))")
+_YEAR_ONLY_PATTERN = re.compile(r"^\s*(\d{4})\s*年?\s*$")
+
 
 def _allow_online() -> bool:
     """是否允许联网取数。**默认开启**，语义是「离线优先」：
@@ -233,6 +237,15 @@ def normalize_time(value: Any) -> str:
             return datetime(datetime.now().year, month, day).date().isoformat()
         except ValueError:
             return ""
+    # 统计类指标常用「年度 / 季度」口径：保留成 2025 或 2025Q3，不硬造具体日期。
+    quarter = _QUARTER_PATTERN.search(text)
+    if quarter:
+        year, raw_quarter = quarter.group(1), quarter.group(2) or quarter.group(3)
+        digits = {"一": "1", "二": "2", "三": "3", "四": "4"}
+        return f"{year}Q{digits.get(raw_quarter, raw_quarter)}"
+    year_only = _YEAR_ONLY_PATTERN.search(text)
+    if year_only:
+        return year_only.group(1)
     return ""
 
 
@@ -257,6 +270,11 @@ def normalize_parse(raw: Mapping[str, Any] | None) -> RequestParse:
         "metric": map_metric(data.get("metric")),
     }
     missing = [name for name in ("place", "time", "metric") if not request[name]]
+    # 社会经济统计类指标（GDP / 人均GDP / 人口 / 财政收入 …）本身就是年度或季度口径，
+    # 数据源只提供最新一期，不该要求用户给出「精确到某一天」。否则「山东各市人均GDP」
+    # 会被反复追问「要哪一天的数据」，而这个问题对统计口径没有意义。
+    if request["metric"] and not _is_air_quality_metric(request["metric"]):
+        missing = [name for name in missing if name != "time"]
 
     model_questions = [_clean(item) for item in (data.get("questions") or []) if _clean(item)]
     if not missing:
@@ -296,8 +314,17 @@ def parse_request(
         "known_fields": {"place": "", "time": "", "metric": ""},
         "output_schema": {
             "place": "区域名称，缺项填空字符串",
-            "time": "YYYY-MM-DD，缺项填空字符串",
-            "metric": "PM2.5 / PM10 / NO2 / SO2 / O3 / CO / AQI，缺项填空字符串",
+            "time": (
+                "日期或年份。空气质量类指标要 YYYY-MM-DD；社会经济统计类指标"
+                "（GDP / 人均GDP / 人口 / 财政收入 / 城镇化率等）只给年份也可以，"
+                "如 2025 或 2025年，照原文保留；完全没提时间才填空字符串"
+            ),
+            "metric": (
+                "指标名，照抄原文。可以是空气质量指标（PM2.5 / PM10 / NO2 / SO2 / O3 / "
+                "CO / AQI），也可以是社会经济统计指标（GDP / 人均GDP / 人口 / 财政收入 / "
+                "城镇化率 / CPI / 进出口总额 / 医院床位数 等）。**不要因为不是空气质量指标"
+                "就留空**"
+            ),
             "questions": ["仅当字段缺失时填写，最多两条；三项齐全时必须为 []"],
         },
         "format_instruction": "只返回一个 JSON 对象，不要 Markdown 表格、代码围栏或解释文字。",
@@ -957,7 +984,9 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
     """把 Cartographer 的决策与本地确定性字段合成合法 MapSpec。"""
     place = request["place"]
     date = request["time"]
-    field_name = request["metric"]
+    # 字段名以「加载后实际拿到的字段」为准：统计指标（人均GDP → renjun）与空气质量
+    # （PM2.5 → PM2_5_24h）都会改名，直接用原话的指标名会报「字段不存在」。
+    field_name = _clean(str(loaded.get("field") or "")) or request["metric"]
     decision = str(loaded["decision"])
     draft_type = _clean(draft.get("map_type"))
 
@@ -1016,7 +1045,11 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
 
     return build_spec(
         {
-            "title": _ensure_title(draft.get("title"), place, field_name, date),
+            # 标题用「用户说的指标名」（人均GDP），不用内部字段名（renjun）；
+            # 字段名只用于数据绑定（spec_field）。
+            "title": _ensure_title(
+                draft.get("title"), place, request["metric"] or field_name, date
+            ),
             "map_type": map_type,
             "adcode": loaded.get("admin", layer).meta.get("adcode"),
             "bbox": _bbox_for(loaded, map_type),
@@ -1450,6 +1483,15 @@ def run_one_sentence(
     parse = parse_request(text, caller, history=history)
     if parse.questions:
         return _needs_input(parse)
+
+    # 社会经济统计指标（GDP / 人均GDP / 城镇化率 …）的数据源只给最新一期，
+    # 「具体某一天」对它没有意义。这里补一个「最新」占位，否则 loop 的
+    # missing_fields 会把它当成缺时间、反复追问「要哪一天的数据」。
+    request = dict(parse.request)
+    if request.get("metric") and not _is_air_quality_metric(request["metric"]):
+        if not request.get("time"):
+            request["time"] = "最新"
+    parse = RequestParse(request=request, questions=[], raw=parse.raw)
 
     state: dict[str, Any] = {}
     result = loop_run(

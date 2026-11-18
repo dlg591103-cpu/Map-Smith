@@ -198,6 +198,230 @@
       "adcode": "320382",
       "level": "county_city",
       "parent": "徐州市"
+    },
+    {
+      "name": "北京",
+      "full_name": "北京市",
+      "adcode": "110000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "天津",
+      "full_name": "天津市",
+      "adcode": "120000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "河北",
+      "full_name": "河北省",
+      "adcode": "130000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "山西",
+      "full_name": "山西省",
+      "adcode": "140000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "内蒙古",
+      "full_name": "内蒙古自治区",
+      "adcode": "150000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "辽宁",
+      "full_name": "辽宁省",
+      "adcode": "210000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "吉林",
+      "full_name": "吉林省",
+      "adcode": "220000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "黑龙江",
+      "full_name": "黑龙江省",
+      "adcode": "230000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "上海",
+      "full_name": "上海市",
+      "adcode": "310000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "浙江",
+      "full_name": "浙江省",
+      "adcode": "330000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "安徽",
+      "full_name": "安徽省",
+      "adcode": "340000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "福建",
+      "full_name": "福建省",
+      "adcode": "350000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "江西",
+      "full_name": "江西省",
+      "adcode": "360000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "山东",
+      "full_name": "山东省",
+      "adcode": "370000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "河南",
+      "full_name": "河南省",
+      "adcode": "410000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "湖北",
+      "full_name": "湖北省",
+      "adcode": "420000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "湖南",
+      "full_name": "湖南省",
+      "adcode": "430000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "广西",
+      "full_name": "广西壮族自治区",
+      "adcode": "450000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "海南",
+      "full_name": "海南省",
+      "adcode": "460000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "重庆",
+      "full_name": "重庆市",
+      "adcode": "500000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "四川",
+      "full_name": "四川省",
+      "adcode": "510000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "贵州",
+      "full_name": "贵州省",
+      "adcode": "520000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "云南",
+      "full_name": "云南省",
+      "adcode": "530000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "西藏",
+      "full_name": "西藏自治区",
+      "adcode": "540000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "陕西",
+      "full_name": "陕西省",
+      "adcode": "610000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "甘肃",
+      "full_name": "甘肃省",
+      "adcode": "620000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "青海",
+      "full_name": "青海省",
+      "adcode": "630000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "宁夏",
+      "full_name": "宁夏回族自治区",
+      "adcode": "640000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "新疆",
+      "full_name": "新疆维吾尔自治区",
+      "adcode": "650000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "台湾",
+      "full_name": "台湾省",
+      "adcode": "710000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "香港",
+      "full_name": "香港特别行政区",
+      "adcode": "810000",
+      "level": "province",
+      "parent": null
+    },
+    {
+      "name": "澳门",
+      "full_name": "澳门特别行政区",
+      "adcode": "820000",
+      "level": "province",
+      "parent": null
     }
   ]
 }
