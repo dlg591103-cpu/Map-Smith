@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,75 @@ def test_index_returns_build_hint_when_dist_missing(client):
     response = client.get("/")
     assert response.status_code == 503
     assert "前端未构建" in response.text
+
+
+def test_settings_get_masks_secrets(client, monkeypatch, tmp_path: Path):
+    """GET /api/settings 只回显脱敏密钥，绝不返回完整值。"""
+    settings = Settings(
+        output_dir=tmp_path,
+        project_root=tmp_path,
+        llm_base_url="https://api.example.com/v1",
+        llm_api_key="sk-test-1234567890abcdef",
+        llm_model="test-model",
+    )
+    monkeypatch.setattr(server, "get_settings", lambda: settings)
+    monkeypatch.setenv("MAPSMITH_STATS_API_KEY", "ghk_abcdef1234567890")
+
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["llm"]["api_key_configured"] is True
+    assert data["llm"]["api_key_masked"] == "sk-t…cdef"
+    assert data["stats"]["api_key_configured"] is True
+    assert data["stats"]["api_key_masked"] == "ghk_…7890"
+    # 完整密钥不得出现（base_url / model 是明文配置项，允许回显）
+    blob = json.dumps(data, ensure_ascii=False)
+    assert "1234567890abcdef" not in blob
+    assert "ghk_abcdef1234567890" not in blob
+
+
+def test_settings_put_updates_only_given_fields(client, monkeypatch, tmp_path: Path):
+    """PUT 只更新非空字段，写回 .env 并保留未提供的密钥。"""
+    settings = Settings(
+        output_dir=tmp_path,
+        project_root=tmp_path,
+        llm_base_url="https://api.example.com/v1",
+        llm_api_key="sk-test-1234567890abcdef",
+        llm_model="test-model",
+    )
+    monkeypatch.setattr(server, "get_settings", lambda: settings)
+
+    # 空 patch：保持原值
+    response = client.put("/api/settings", json={})
+    assert response.status_code == 200
+    assert response.json()["llm"]["api_key_configured"] is True
+
+    # 只改 model：key 保留，环境变量与 .env 都要更新
+    response = client.put("/api/settings", json={"llm_model": "new-model"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["llm"]["api_key_configured"] is True
+    assert os.environ.get("MAPSMITH_LLM_MODEL") == "new-model"
+
+    env_file = tmp_path / ".env"
+    assert env_file.exists()
+    content = env_file.read_text(encoding="utf-8")
+    assert "MAPSMITH_LLM_MODEL=new-model" in content
+    # 未提供的字段不该出现在 .env（或不被改动）
+    assert "MAPSMITH_LLM_API_KEY=" not in content
+
+
+def test_settings_put_writes_stats_key_to_env(client, monkeypatch, tmp_path: Path):
+    """数据 API Key 也能通过设置窗口写入 .env 并立即生效。"""
+    settings = Settings(output_dir=tmp_path, project_root=tmp_path)
+    monkeypatch.setattr(server, "get_settings", lambda: settings)
+
+    response = client.put("/api/settings", json={"stats_api_key": "ghk_newkey123456"})
+    assert response.status_code == 200
+    assert response.json()["stats"]["api_key_configured"] is True
+
+    content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "MAPSMITH_STATS_API_KEY=ghk_newkey123456" in content
 
 
 def test_upload_point_without_crs(client):

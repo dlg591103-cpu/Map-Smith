@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import re
 import threading
@@ -24,7 +25,7 @@ from pydantic import BaseModel, Field
 from . import flow
 from . import sessions as session_store
 from .agents.llm import LLMError, LLMNotConfigured, configured
-from .config import Settings, get_settings
+from .config import Settings, get_settings, update_env_file
 from .io.models import CrsNotDeclared, DataError, FieldMissing
 from .io.uploads import parse_upload
 
@@ -92,6 +93,15 @@ class SessionSaveBody(BaseModel):
     # 前端把整段对话原样回传；只保留展示字段，校验在 sessions 模块里做。
     messages: list[dict[str, Any]] = Field(default_factory=list)
     title: str | None = None
+
+
+class SettingsBody(BaseModel):
+    """程序内配置 API Key。字段为空/None 表示「保持不变」，不覆盖也不清空。"""
+
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    stats_api_key: str | None = None
 
 
 def _settings() -> Settings:
@@ -210,6 +220,76 @@ def stats_balance() -> dict[str, Any]:
         "daily_limit": data.get("daily_limit"),
         "daily_used": data.get("daily_used"),
     }
+
+
+def _mask_secret(value: str | None) -> str:
+    """脱敏展示：只保留首尾各 4 位，中间打码；短值全码。"""
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:4]}…{value[-4:]}"
+
+
+def _settings_snapshot() -> dict[str, Any]:
+    """当前配置的脱敏快照，供 GET /api/settings 与保存后回显。"""
+    from .tools.stats_api import stats_api_key
+
+    current = get_settings()
+    stats_key = stats_api_key()
+    return {
+        "llm": {
+            "base_url": current.llm_base_url or "",
+            "model": current.llm_model or "",
+            "api_key_configured": bool(current.llm_api_key),
+            "api_key_masked": _mask_secret(current.llm_api_key),
+            "configured": current.llm_configured,
+            "provider": current.llm_provider,
+        },
+        "stats": {
+            "api_key_configured": bool(stats_key),
+            "api_key_masked": _mask_secret(stats_key),
+        },
+    }
+
+
+@app.get("/api/settings")
+def get_settings_api() -> dict[str, Any]:
+    """读取当前 API 配置（密钥脱敏，绝不回传完整值）。"""
+    return _settings_snapshot()
+
+
+@app.put("/api/settings")
+def update_settings_api(body: SettingsBody) -> dict[str, Any]:
+    """写入 API 配置：只更新非空字段，写回 `.env` 并立即生效。
+
+    密钥只在本次请求体内出现，写盘后不落日志、不回显完整值。
+    """
+    mapping = (
+        ("llm_base_url", "MAPSMITH_LLM_BASE_URL"),
+        ("llm_model", "MAPSMITH_LLM_MODEL"),
+        ("llm_api_key", "MAPSMITH_LLM_API_KEY"),
+        ("stats_api_key", "MAPSMITH_STATS_API_KEY"),
+    )
+    updates: dict[str, str] = {}
+    for field, env_name in mapping:
+        value = getattr(body, field)
+        if value not in (None, ""):
+            updates[env_name] = value.strip()
+
+    if updates:
+        # 写到运行时的项目根 .env（而非 config 模块级 PROJECT_ROOT），
+        # 这样测试可 monkeypatch get_settings 指到临时目录，避免污染真实 .env。
+        update_env_file(updates, path=get_settings().project_root / ".env")
+        for env_name, value in updates.items():
+            os.environ[env_name] = value
+        # 清掉 config 的 lru_cache 让新值生效；测试里 get_settings 被替换成普通
+        # 函数、没有 cache_clear，用 getattr 兜底即可。
+        cache_clear = getattr(get_settings, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
+
+    return _settings_snapshot()
 
 
 @app.post("/api/upload")

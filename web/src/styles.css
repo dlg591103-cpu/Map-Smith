@@ -66,6 +66,14 @@ button { cursor: pointer; }
 
 .side-action:hover { border-color: var(--brand); color: var(--brand); }
 
+/* 「设置 API」按钮贴在侧栏底部，与状态提示区分开。 */
+.side-settings {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .nav {
   display: flex;
   flex-direction: column;
@@ -609,4 +617,71 @@ pre {
 }
 .cost-confirm-btn:hover {
   background: #f2b83a;
+}
+
+/* API 配置弹窗（SettingsDialog）。复用 .overlay / .dialog 基底，这里补表单细节。 */
+.settings-dialog {
+  width: min(520px, 100%);
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dialog-head h3 {
+  margin: 0;
+}
+.dialog-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.dialog-close:hover {
+  color: var(--text);
+}
+.dialog-sub {
+  margin: 6px 0 14px;
+}
+.dialog-sub code {
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+.settings-group {
+  margin-bottom: 16px;
+}
+.settings-group h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--text);
+}
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 10px 0 4px;
+}
+.dialog input[type='text'],
+.dialog input[type='password'] {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 14px;
+}
+.dialog input:focus {
+  outline: 2px solid var(--brand);
+  outline-offset: 0;
+}
+.saved-note {
+  color: #0a7c4e;
+  font-size: 13px;
+  margin-top: 8px;
 }

@@ -46,6 +46,39 @@ def _load_dotenv(path: Path) -> None:
             os.environ[key] = value
 
 
+def update_env_file(updates: dict[str, str], *, path: Path | None = None) -> Path:
+    """把给定键写回项目根 `.env`（保留其它行，键不存在则追加）。
+
+    供「程序内配置 API Key」使用：调用方先改环境变量再写盘，或先写盘再
+    `get_settings.cache_clear()`。值为空串的键不写入也不删除——空值表示
+    「保持不变」。返回值是实际写入的文件路径。
+    """
+    target = path or (PROJECT_ROOT / ".env")
+    lines: list[str] = []
+    if target.exists():
+        lines = target.read_text(encoding="utf-8").splitlines()
+
+    pending = {key: value for key, value in updates.items() if value not in (None, "")}
+    written: set[str] = set()
+    out: list[str] = []
+    for raw in lines:
+        line = raw.rstrip("\r\n")
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in pending:
+                out.append(f"{key}={pending[key]}")
+                written.add(key)
+                continue
+        out.append(line)
+    for key, value in pending.items():
+        if key not in written:
+            out.append(f"{key}={value}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return target
+
+
 def _env_text(name: str) -> str | None:
     raw = os.environ.get(ENV_PREFIX + name)
     if raw is None or raw.strip() == "":

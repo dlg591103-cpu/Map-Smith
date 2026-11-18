@@ -67,6 +67,29 @@ export interface SessionDetail extends SessionMeta {
   messages: Message[]
 }
 
+// API 配置（程序内设置窗口）：密钥只返回「是否配置 + 脱敏值」，绝不回传完整值。
+export interface SettingsInfo {
+  llm: {
+    base_url: string
+    model: string
+    api_key_configured: boolean
+    api_key_masked: string
+    configured: boolean
+    provider: string
+  }
+  stats: {
+    api_key_configured: boolean
+    api_key_masked: string
+  }
+}
+
+export interface SettingsPatch {
+  llm_base_url?: string
+  llm_api_key?: string
+  llm_model?: string
+  stats_api_key?: string
+}
+
 export interface FormState {
   place: string
   time: string
