@@ -35,9 +35,17 @@ const costQuestion = computed(() => {
   return questions.find((item) => String(item).includes('积分')) || ''
 })
 
+/** 追问里说「余额不足」时，点「确认购买」也买不到——按钮改成「去充值」才诚实。 */
+const costShort = computed(() => costQuestion.value.includes('余额不足'))
+
 /** 用户点「确认购买」：带 confirm_cost 重发，后端才会真正扣分取数。 */
 function confirmCost(): void {
   send('确认购买', null, true)
+}
+
+/** 余额不足时直接引导到聚汇会员中心，避免反复点确认还是买不到。 */
+function openRecharge(): void {
+  window.open('https://www.gotohui.com/user/', '_blank', 'noopener')
 }
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -279,7 +287,17 @@ onMounted(() => {
 
     <div v-if="costQuestion && !busy" class="cost-confirm">
       <span class="cost-confirm-text">{{ costQuestion }}</span>
-      <button class="cost-confirm-btn" type="button" @click="confirmCost">确认购买</button>
+      <button
+        v-if="costShort"
+        class="cost-confirm-btn"
+        type="button"
+        @click="openRecharge"
+      >
+        去充值
+      </button>
+      <button v-else class="cost-confirm-btn" type="button" @click="confirmCost">
+        确认购买
+      </button>
     </div>
 
     <Composer
