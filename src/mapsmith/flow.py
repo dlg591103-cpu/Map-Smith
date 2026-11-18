@@ -126,6 +126,18 @@ def _allow_online() -> bool:
     return raw not in {"1", "true", "yes", "on"}
 
 
+def _allow_online_stats_search() -> bool:
+    """是否允许「联网搜索统计数据」。默认关闭。
+
+    实测：免费搜索通道不可靠——Bing HTML 结果页只返回百科/政府首页，搜狗与百度
+    直连返回验证页，抓不到具体数据表。因此这条链路只作为实验性兜底，需要显式设
+    ``MAPSMITH_SEARCH_ONLINE=1`` 才启用；即使启用也做了地区名校验，抽不到可信
+    数据会明确报错而不是编数字。
+    """
+    raw = os.environ.get("MAPSMITH_SEARCH_ONLINE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class RequestParse:
     """一次一句话解析的结果；`questions` 非空即先反问，不进入 loop。"""
@@ -421,6 +433,46 @@ def _join_upload_table(
     return joined, value_col
 
 
+def _search_online_stats(
+    place: str,
+    field_name: str,
+    stat_key: str,
+    adcode: str,
+    admin_layer: DataLayer,
+) -> tuple[pd.DataFrame, str] | None:
+    """联网搜索统计数据（实验性，需 MAPSMITH_SEARCH_ONLINE=1）。
+
+    成功时把结果缓存到 ``demo_data/stats/``，之后同一地区走预置路径、不再联网。
+    失败返回 None，由调用方给出「没找到可信数据」的提示——不编数字。
+    """
+    from .tools.web_stats import fetch_online_stats
+
+    boundary = admin_layer.gdf
+    if boundary is None or "name" not in boundary.columns:
+        return None
+    names = {str(v).strip() for v in boundary["name"].dropna()}
+    if not names:
+        return None
+    try:
+        caller = default_llm_callable(settings=get_settings())
+        got = fetch_online_stats(place, stat_key, field_name, names, caller=caller)
+    except Exception:  # noqa: BLE001 - 实验性链路，任何异常都退化为「没搜到」
+        return None
+    if got is None:
+        return None
+    frame, source = got
+    frame = frame.rename(columns={"value": stat_key})
+    stamp = time.strftime("%Y%m%d")
+    filename = f"{adcode}_{stat_key}_{stamp}.csv"
+    try:
+        target = get_settings().demo_data_dir / "stats" / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(target, index=False, encoding="utf-8-sig")
+    except OSError:  # 缓存失败不影响本次出图
+        pass
+    return frame, f"{source}（已缓存 {filename}）"
+
+
 def _surface_profile(layer: DataLayer, field_name: str) -> SurfaceProfile:
     if layer.gdf is None:
         raise DataError(f"{layer.name} 没有几何，无法做面图层体检")
@@ -540,13 +592,16 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
         admin_layer = load_admin(place, online=_allow_online())
         adcode = str(admin_layer.meta.get("adcode") or "")
         preset = load_preset_stats(adcode, stat_key)
+        if preset is None and _allow_online_stats_search():
+            # 实验性兜底：显式开启 MAPSMITH_SEARCH_ONLINE=1 时才联网检索。
+            preset = _search_online_stats(place, field_name, stat_key, adcode, admin_layer)
         if preset is not None:
             stats_df, stats_name = preset
             table_layer = DataLayer(
                 kind="table",
                 name=stats_name,
-                source=f"预置统计数据 {stats_name}",
-                summary=f"{stats_name}：{len(stats_df)} 行预置统计值",
+                source=f"统计数据 {stats_name}",
+                summary=f"{stats_name}：{len(stats_df)} 行统计值",
                 table=stats_df,
             )
             joined, actual_field = _join_upload_table(table_layer, admin_layer, field_name)
@@ -564,12 +619,14 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
                 "date": date,
                 "place": place,
             }
+        hint = ""
+        if _allow_online_stats_search():
+            hint = "（已开启联网搜索但没找到可信数据）"
         raise DataError(
             f"{place} 没有预置的 {field_name} 统计数据（demo_data/stats/ 下没有 "
-            f"{adcode}_{stat_key}*.csv）。可以改为上传一份「行政区名 + {field_name}」的 CSV，"
-            "或先用其它指标（如 PM2.5）。"
+            f"{adcode}_{stat_key}*.csv）{hint}。可以改为上传一份「行政区名 + {field_name}」"
+            "的 CSV，或先用其它指标（如 PM2.5）。"
         )
-
     admin, points = resolve_inputs(place, date, field_name, online=_allow_online())
     profile = profile_points(points, field_name=field_name, study_area=admin)
     return {

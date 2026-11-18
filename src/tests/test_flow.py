@@ -880,3 +880,16 @@ def test_join_upload_table_raises_when_no_admin_name_match():
 
     with pytest.raises(Exception):
         flow._join_upload_table(table, admin, "PM2_5_24h")
+
+
+def test_allow_online_stats_search_defaults_off(monkeypatch):
+    """联网搜索统计数据是实验性能力，默认关闭（免费搜索通道实测不可靠）。"""
+    monkeypatch.delenv("MAPSMITH_SEARCH_ONLINE", raising=False)
+    assert flow._allow_online_stats_search() is False
+
+    for value in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("MAPSMITH_SEARCH_ONLINE", value)
+        assert flow._allow_online_stats_search() is True
+
+    monkeypatch.setenv("MAPSMITH_SEARCH_ONLINE", "0")
+    assert flow._allow_online_stats_search() is False
