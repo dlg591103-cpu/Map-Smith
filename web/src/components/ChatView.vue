@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { confirmCrs as confirmCrsApi, streamPost, uploadFile } from '../api'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { confirmCrs as confirmCrsApi, getSession, saveSession, streamPost, uploadFile } from '../api'
 import type { CrsRequired, Message, ResultPayload, UploadInfo } from '../types'
 import Composer from './Composer.vue'
 import CrsDialog from './CrsDialog.vue'
 import MessageBubble from './MessageBubble.vue'
 
-defineProps<{ llmConfigured: boolean }>()
-const emit = defineEmits<{ historyChanged: [] }>()
+const props = defineProps<{ llmConfigured: boolean; sessionId: string | null }>()
+const emit = defineEmits<{ sessionsChanged: [] }>()
 
 const messages = ref<Message[]>([])
 const busy = ref(false)
@@ -15,6 +15,12 @@ const attachment = ref<UploadInfo | null>(null)
 const pendingCrs = ref<CrsRequired | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 const lastRequest = ref<{ message: string; uploadId: string | null } | null>(null)
+// 追问期间累积的用户原话。后端把这些拼进解析上下文，避免「说了徐州又让说徐州」
+// 的死循环；出图成功或新建对话时清空。
+const pendingContext = ref<string[]>([])
+// 历史会话防抖保存：只在内容确实变化时落盘，避免加载后立刻回写一次。
+let saveTimer: number | undefined
+let lastSaved = ''
 
 const suggestions = [
   '徐州 2026-11-01 的 PM2.5 分布图',
@@ -22,6 +28,25 @@ const suggestions = [
   '徐州 2026-11-01 的 PM10 点图',
 ]
 
+/** 最后一条助手消息里「要花积分确认」的追问；有值时显示确认按钮。 */
+const costQuestion = computed(() => {
+  const last = [...messages.value].reverse().find((message) => message.role === 'assistant')
+  const questions = last?.result?.questions || []
+  return questions.find((item) => String(item).includes('积分')) || ''
+})
+
+/** 追问里说「余额不足」时，点「确认购买」也买不到——按钮改成「去充值」才诚实。 */
+const costShort = computed(() => costQuestion.value.includes('余额不足'))
+
+/** 用户点「确认购买」：带 confirm_cost 重发，后端才会真正扣分取数。 */
+function confirmCost(): void {
+  send('确认购买', null, true)
+}
+
+/** 余额不足时直接引导到聚汇会员中心，避免反复点确认还是买不到。 */
+function openRecharge(): void {
+  window.open('https://www.gotohui.com/member/recharge', '_blank', 'noopener')
+}
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -42,13 +67,66 @@ function scrollToBottom(): void {
   })
 }
 
-function saveHistory(): void {
-  const recent = messages.value
+/** 只落盘展示字段：stage 是本次请求的进度，恢复后没有意义。 */
+function storedMessages(): Message[] {
+  return messages.value.map((message) => ({
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    error: message.error,
+    result: message.result,
+  }))
+}
+
+async function persist(): Promise<void> {
+  const id = props.sessionId
+  if (!id || !messages.value.length) return
+  const payload = storedMessages()
+  const key = JSON.stringify(payload)
+  if (key === lastSaved) return
+  try {
+    await saveSession(id, payload)
+    lastSaved = key
+    emit('sessionsChanged')
+  } catch {
+    // 保存失败不打断对话：下一次消息变化还会再试。
+  }
+}
+
+function scheduleSave(): void {
+  if (!props.sessionId || !messages.value.length) return
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => void persist(), 600)
+}
+
+/** 恢复会话时重建追问上下文：最后一条助手消息仍在提问时，
+ * 此前的用户原话要一并交给后端，否则重启后又得从头问一遍。 */
+function contextFrom(loaded: Message[]): string[] {
+  const last = [...loaded].reverse().find((message) => message.role === 'assistant')
+  if (!last?.result?.questions?.length) return []
+  return loaded
     .filter((message) => message.role === 'user')
-    .map((message) => message.text)
-    .slice(-20)
-  sessionStorage.setItem('mapsmith_history', JSON.stringify(recent))
-  emit('historyChanged')
+    .map((message) => String(message.text || '').split('\n📎')[0].trim())
+    .filter(Boolean)
+    .slice(-4)
+}
+
+async function loadSession(id: string): Promise<void> {
+  // 刚新建、还没落盘的会话会拿到 404，按空对话处理即可。
+  const data = await getSession(id).catch(() => null)
+  if (!data || !data.messages.length) return
+  messages.value = data.messages.map((item) =>
+    reactive<Message>({
+      id: item.id || newId(),
+      role: item.role,
+      text: item.text || '',
+      error: item.error,
+      result: item.result,
+    }),
+  )
+  pendingContext.value = contextFrom(data.messages)
+  lastSaved = JSON.stringify(storedMessages())
+  scrollToBottom()
 }
 
 function crsInfo(upload: UploadInfo): CrsRequired {
@@ -96,7 +174,7 @@ async function confirmCrs(crs: string): Promise<void> {
   }
 }
 
-async function send(text: string, uploadIdOverride?: string | null): Promise<void> {
+async function send(text: string, uploadIdOverride?: string | null, confirmCost = false): Promise<void> {
   if (busy.value) return
   if (attachment.value?.crs_status === 'missing' && uploadIdOverride === undefined) {
     pendingCrs.value = crsInfo(attachment.value)
@@ -111,10 +189,13 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
   addMessage('user', attachmentName ? `${content}\n📎 ${attachmentName}` : content)
   const assistant = addMessage('assistant', '')
   busy.value = true
-  lastRequest.value = { message: content, uploadId: uploadId || null }
+  lastRequest.value = { message: content, uploadId: uploadId || null, confirmCost }
+
+  // 带着追问上下文发送：上一轮是追问时，把之前说过的话一起交给后端。
+  const history = [...pendingContext.value]
 
   try {
-    await streamPost('/api/chat', { message: content, upload_id: uploadId }, (event, data) => {
+    await streamPost('/api/chat', { message: content, history, upload_id: uploadId, confirm_cost: confirmCost }, (event, data) => {
       if (event === 'stage') {
         assistant.stage = String(data.label || data.stage || '处理中')
       } else if (event === 'crs_required') {
@@ -125,10 +206,18 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
         busy.value = false
       } else if (event === 'result') {
         assistant.stage = undefined
-        assistant.result = data as unknown as ResultPayload
+        const payload = data as unknown as ResultPayload
+        assistant.result = payload
+        // 仍在追问：把这次的原话攒进上下文，下一轮一起发送；否则话题结束，清空。
+        if (payload.questions && payload.questions.length > 0) {
+          pendingContext.value = [...history, content]
+        } else {
+          pendingContext.value = []
+        }
       } else if (event === 'error') {
         assistant.stage = undefined
         assistant.error = String(data.message || '请求失败')
+        pendingContext.value = []
       } else if (event === 'done') {
         assistant.stage = undefined
         busy.value = false
@@ -141,7 +230,7 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
     assistant.stage = undefined
     busy.value = false
     attachment.value = null
-    saveHistory()
+    scheduleSave()
     scrollToBottom()
   }
 }
@@ -152,6 +241,22 @@ function removeAttachment(): void {
 }
 
 watch(messages, scrollToBottom, { deep: true })
+// 一轮结束后才写盘：busy 期间消息还在流式变化，存中间态没有意义。
+watch(
+  messages,
+  () => {
+    if (!busy.value) scheduleSave()
+  },
+  { deep: true },
+)
+// 切换会话时组件会被重建，按目标 ID 载入历史；刚新建的空会话 404 视为空对话。
+watch(
+  () => props.sessionId,
+  (id) => {
+    if (id) void loadSession(id)
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   scrollToBottom()
@@ -178,6 +283,21 @@ onMounted(() => {
 
     <div v-if="!llmConfigured" class="hint" style="text-align: center; padding-bottom: 6px">
       未配置模型：请设置 MAPSMITH_LLM_BASE_URL / MAPSMITH_LLM_API_KEY / MAPSMITH_LLM_MODEL，或在「高级表单」中出图。
+    </div>
+
+    <div v-if="costQuestion && !busy" class="cost-confirm">
+      <span class="cost-confirm-text">{{ costQuestion }}</span>
+      <button
+        v-if="costShort"
+        class="cost-confirm-btn"
+        type="button"
+        @click="openRecharge"
+      >
+        去充值
+      </button>
+      <button v-else class="cost-confirm-btn" type="button" @click="confirmCost">
+        确认购买
+      </button>
     </div>
 
     <Composer
