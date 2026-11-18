@@ -27,8 +27,15 @@ import requests
 
 BASE_URL = "https://www.gotohui.com/api/open/v1"
 _TIMEOUT = 25.0
-# 指标标识 → 榜单标题里的关键词
+# 指标标识 → 榜单标题里的关键词（/ranking/list 搜索用）
 _RANKING_WORDS = {"gdp": "GDP", "population": "人口"}
+# 边界层级 → 该取的榜单 slug。
+# 注意：API 只提供「全国视角」的榜单（全国各省 / 全国各地级市），**没有区县级榜单**；
+# 所以省级边界要取「全国地级市」榜再按本省各市名筛选，国家级别取「全国各省」榜。
+_SLUG_BY_LEVEL = {
+    "gdp": {"country": "gdp/province", "province": "gdp/city"},
+    "population": {"country": "renkou/province", "province": "renkou/city"},
+}
 _SUFFIXES = ("市", "区", "县", "自治州", "盟", "地区")
 
 
@@ -129,30 +136,34 @@ def _pick_slug(
 
 def fetch_region_stats(
     metric_key: str,
-    adcode: str,
+    level: str,
     admin_names: set[str],
 ) -> tuple[pd.DataFrame, str] | None:
-    """用免费的榜单接口取「某地区下辖各市/区县」的指标值。
+    """用免费的榜单接口取「目标边界下辖各行政区」的指标值。
 
-    返回 ``(DataFrame(district, value), 来源说明)``；未配置 Key 或没找到匹配榜单
-    时返回 None（调用方给明确提示，不编数据）。
+    - 边界是省级（如江苏省）：取「全国各地级市」榜，再按本省各市名筛选；
+    - 边界是国家级别：取「全国各省」榜。
+    - 区县级没有对应榜单，返回 None（由调用方提示改用预置/上传）。
+
+    返回 ``(DataFrame(district, value), 来源说明)``；未配置 Key 或筛选后不足 2 行
+    时返回 None，不猜数据。
     """
     if not stats_api_key() or not admin_names:
         return None
-    word = _RANKING_WORDS.get(metric_key)
-    if word is None:
-        return None
-    rankings = list_rankings(word)
-    if not rankings:
-        return None
-    slug = _pick_slug(rankings, adcode, admin_names)
+    normal_level = "province" if str(level).lower() == "province" else "country"
+    slug = _SLUG_BY_LEVEL.get(metric_key, {}).get(normal_level)
     if slug is None:
         return None
     got = fetch_ranking(slug)
     if got is None:
         return None
     rows, unit = got
-    frame = pd.DataFrame(rows).drop_duplicates(subset=["district"])
-    title = next((str(r.get("title") or "") for r in rankings if r.get("slug") == slug), slug)
-    source = f"聚汇数据开放API榜单「{title}」{('（单位：' + unit + '）') if unit else ''}"
+    wanted = {_base_name(name) for name in admin_names}
+    matched = [row for row in rows if _base_name(row["district"]) in wanted]
+    if len(matched) < 2:
+        return None
+    frame = pd.DataFrame(matched).drop_duplicates(subset=["district"])
+    title = "全国各省" if normal_level == "country" else "全国各地级市"
+    label = "GDP" if metric_key == "gdp" else "常住人口"
+    source = f"聚汇数据开放API「{title}{label}排行榜」{('（单位：' + unit + '）') if unit else ''}"
     return frame, source

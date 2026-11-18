@@ -432,7 +432,23 @@ def _join_upload_table(
             f"可用列：{list(map(str, stats.columns))}"
         )
 
-    joined = join_table(layer, admin, key=(table_key, "name"))
+    # 关联前把统计表的地区名规范化成边界里的标准写法：
+    # 数据源常给「广州」而边界是「广州市」，直接 merge 会一个都对不上。
+    base_to_admin = {_base_admin_name(name): str(name).strip() for name in boundary["name"]}
+    normalized = stats.copy()
+    join_key = "__mapsmith_join_key__"
+    normalized[join_key] = normalized[table_key].map(
+        lambda value: base_to_admin.get(_base_admin_name(value))
+    )
+    table_layer = DataLayer(
+        kind="table",
+        name=layer.name,
+        source=layer.source,
+        summary=layer.summary,
+        table=normalized,
+    )
+
+    joined = join_table(table_layer, admin, key=(join_key, "name"))
     if joined.gdf is None:
         raise DataError(f"{layer.name} 关联行政区后没有产生面图层")
     if value_col not in joined.gdf.columns:
@@ -489,7 +505,8 @@ def _load_stats_from_api(
     if not names:
         return None
     try:
-        got = fetch_region_stats(stat_key, adcode, names)
+        level = str(admin_layer.meta.get("level") or "")
+        got = fetch_region_stats(stat_key, level, names)
     except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
         return None
     if got is None:
