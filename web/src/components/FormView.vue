@@ -202,7 +202,9 @@ async function submit(confirmCost = false): Promise<void> {
       </p>
 
       <div class="form-actions">
-        <button class="btn primary" :disabled="busy" @click="submit">生成地图</button>
+        <!-- 必须写成 submit()：@click="submit" 会把 MouseEvent 当成 confirmCost 传进去，
+             导致请求体 confirm_cost 不是 boolean、被后端 422 拒绝（用户实测踩到）。 -->
+        <button class="btn primary" :disabled="busy" @click="submit()">生成地图</button>
         <span v-if="stage" class="stage"><span class="spinner"></span>{{ stage }}</span>
       </div>
 

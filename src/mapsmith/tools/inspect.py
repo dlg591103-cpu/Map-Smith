@@ -120,7 +120,7 @@ def _reason_lines(n_valid: int, cover: float | None, decision: Decision) -> tupl
         line2 = f"覆盖度：{cover:.0%}（成面阈值 ≥{MIN_COVERAGE_FOR_SURFACE:.0%}）"
 
     if decision == "idw":
-        line3 = "结论：站数与覆盖度均达标，使用 IDW 插值成面（凸包裁剪到行政界内）"
+        line3 = "结论：站数与覆盖度均达标，使用 IDW 插值成面（行政界内全域，凸包外为外插推测值）"
     elif decision == "degrade":
         line3 = "结论：降级为点图 / 气泡图 + 城市面底色，不做插值"
     else:

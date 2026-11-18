@@ -138,6 +138,8 @@ class IDWReport:
     missing_points: int = 0
     crs: str = ""
     summary: str = ""
+    # 是否按行政界放开外插（凸包外着色为推测值）
+    extrapolated: bool = False
 
 
 def render_idw(
@@ -228,9 +230,31 @@ def render_idw(
     meas_y = np.asarray(frame_meas.geometry.y, dtype=float)[valid_mask]
     points_meas = np.column_stack([meas_x, meas_y])
 
-    minx_m, miny_m = meas_x.min(), meas_y.min()
-    maxx_m, maxy_m = meas_x.max(), meas_y.max()
-    # 微扩边界避免边缘像元刚好落在凸包外。
+    # 行政面先解析出来：它既是底图，也决定网格范围与掩膜。
+    background_spec = None
+    admin_meas = None
+    if background_gdf is not None and not getattr(background_gdf, "empty", True):
+        background_spec = (
+            background_gdf.to_crs(spec.crs)
+            if str(getattr(background_gdf, "crs", "")) != str(spec.crs)
+            else background_gdf
+        )
+        admin_meas = (
+            background_spec
+            if str(getattr(background_spec, "crs", "")) == str(measurement)
+            else background_spec.to_crs(measurement)
+        )
+
+    # 网格范围：默认按站点外接框；给了行政面就按行政界范围。只按站点取范围时，
+    # 外插也只能覆盖到站点外接框，省界内其余区域根本不在网格上，色块必然还是
+    # 一块贴着站点的斜多边形。
+    if admin_meas is not None:
+        minx_m, miny_m, maxx_m, maxy_m = (float(v) for v in admin_meas.total_bounds)
+    else:
+        minx_m, miny_m = float(meas_x.min()), float(meas_y.min())
+        maxx_m, maxy_m = float(meas_x.max()), float(meas_y.max())
+
+    # 微扩边界避免边缘像元刚好落在边界线上。
     pad = (maxx_m - minx_m) * 0.02
     minx_m -= pad
     miny_m -= pad
@@ -244,32 +268,25 @@ def render_idw(
     grid_z = _idw(points_meas, valid_vals, grid_x, grid_y, power=IDW_POWER)
     hull = _hull_mask(points_meas, grid_x, grid_y)
 
-    # 行政界掩膜：凸包只覆盖站点密集区，形状与行政区无关。给了行政面就裁到界内，
-    # 掩膜取「凸包 ∩ 行政界」，凸包外或省界外都不着色。
-    background_spec = None
-    if background_gdf is not None and not getattr(background_gdf, "empty", True):
-        background_spec = (
-            background_gdf.to_crs(spec.crs)
-            if str(getattr(background_gdf, "crs", "")) != str(spec.crs)
-            else background_gdf
-        )
-        admin = background_spec
-        if str(getattr(admin, "crs", "")) != str(measurement):
-            admin = admin.to_crs(measurement)
-        try:
-            admin_geom = admin.union_all()
-        except AttributeError:  # shapely < 2.0 或旧 geopandas
-            from shapely.ops import unary_union
-
-            admin_geom = unary_union(list(admin.geometry))
-        hull = hull & _admin_mask(admin_geom, grid_x, grid_y)
-
-    grid_z[~hull] = np.nan
-
     hull_area_m2 = float(
         (hull.sum()) * ((maxx_m - minx_m) / GRID_N) * ((maxy_m - miny_m) / GRID_N)
     )
     hull_area_km2 = hull_area_m2 / 1e6
+
+    # 掩膜：凸包内是实测站点支撑的插值，凸包外是最近站点外推的推测值。给了行政面
+    # 就放开到行政界内全域（注记已注明），这样出图才是「整个行政区」的分布图。
+    extrapolated = admin_meas is not None
+    clip_mask = hull
+    if extrapolated:
+        try:
+            admin_geom = admin_meas.union_all()
+        except AttributeError:  # shapely < 2.0 或旧 geopandas
+            from shapely.ops import unary_union
+
+            admin_geom = unary_union(list(admin_meas.geometry))
+        clip_mask = _admin_mask(admin_geom, grid_x, grid_y)
+
+    grid_z[~clip_mask] = np.nan
 
     # --- 把栅格坐标从度量投影转回输出 CRS，用 imshow 显示 ---
     from pyproj import Transformer
@@ -366,8 +383,8 @@ def render_idw(
     )
     if missing_count:
         summary += f"，缺测 {missing_count} 个站点未参与插值"
-    if background_spec is not None:
-        summary += "；色块已按行政界裁剪，界外与无站点区域留白"
+    if extrapolated:
+        summary += "；色块按行政界裁剪，凸包外为外插推测值"
 
     return IDWReport(
         layout=layout,
@@ -377,4 +394,5 @@ def render_idw(
         missing_points=missing_count,
         crs=str(spec.crs),
         summary=summary,
+        extrapolated=extrapolated,
     )

@@ -301,9 +301,12 @@ def test_render_idw_with_background_crops_to_admin_area() -> None:
     plain = render_idw(make_idw_spec(), gdf)
     cropped = render_idw(make_idw_spec(), gdf, background_gdf=background)
 
-    assert cropped.hull_area_km2 < plain.hull_area_km2
-    assert "按行政界裁剪" in cropped.summary
-    assert "按行政界裁剪" not in plain.summary
+    # 有行政面：网格按行政界取范围、放开到界内全域，凸包外着色为推测值
+    assert cropped.extrapolated is True
+    assert plain.extrapolated is False
+    assert cropped.hull_area_km2 > 0
+    assert "外插推测值" in cropped.summary
+    assert "外插推测值" not in plain.summary
     plt.close("all")
 
 
@@ -317,5 +320,5 @@ def test_render_dispatches_idw_with_background() -> None:
         make_idw_spec(), make_point_gdf([30, 45, 55, 65, 80]), background_gdf=background
     )
 
-    assert "按行政界裁剪" in report.summary
+    assert "外插推测值" in report.summary
     plt.close("all")
