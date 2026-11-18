@@ -370,3 +370,47 @@ def load_air(
             "station_crs": "EPSG:4326",
         },
     )
+
+# --- 预置社会经济统计数据（GDP / 人口等）----------------------------------
+# demo_data/stats/ 下按 `{adcode}_{指标}[_期次].csv` 命名，例如：
+#   320000_gdp_2025q3.csv   江苏省 13 个设区市 2025 年前三季度 GDP（亿元）
+# 数据须为真实公开统计（统计年鉴 / 统计公报），不生成示意值。
+PRESET_STATS_METRICS: dict[str, str] = {
+    "GDP": "gdp",
+    "gdp": "gdp",
+    "人口": "population",
+    "population": "population",
+}
+
+
+def preset_stat_key(metric: str) -> str | None:
+    """指标名 → 预置统计数据标识（gdp / population）；不是这类指标返回 None。"""
+    text = str(metric or "").strip()
+    if not text:
+        return None
+    return PRESET_STATS_METRICS.get(text) or PRESET_STATS_METRICS.get(text.lower())
+
+
+def load_preset_stats(adcode: str, metric_key: str) -> tuple[pd.DataFrame, str] | None:
+    """加载 `demo_data/stats/` 下的预置统计数据；没有则返回 None。
+
+    文件名约定 `{adcode}_{metric_key}[_期次].csv`，同期次取字典序最后一个（即最新）。
+    """
+    if not adcode or not metric_key:
+        return None
+    root = get_settings().demo_data_dir / "stats"
+    if not root.is_dir():
+        return None
+    candidates: list[Path] = []
+    for pattern in (f"{adcode}_{metric_key}_*.csv", f"{adcode}_{metric_key}.csv"):
+        candidates.extend(sorted(root.glob(pattern)))
+    if not candidates:
+        return None
+    path = candidates[-1]
+    try:
+        frame = pd.read_csv(path, encoding="utf-8-sig")
+    except Exception as exc:  # noqa: BLE001 - 预置文件损坏时如实报错
+        raise DataError(f"预置统计数据读取失败：{path.name}（{exc}）") from exc
+    if frame.empty:
+        return None
+    return frame, path.name

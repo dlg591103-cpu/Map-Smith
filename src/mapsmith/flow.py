@@ -37,7 +37,7 @@ from .loop import run as loop_run
 from .spec import MapSpec
 from .tools.analyze import buffer_layer, buffer_metric_stats, clip_layer, overlay_layer
 from .tools.inspect import DataProfile, profile_points
-from .tools.load_layer import load_admin
+from .tools.load_layer import load_admin, load_preset_stats, preset_stat_key
 from .ui import (
     SUPPORTED_METHODS,
     aggregate_points_to_admin,
@@ -532,6 +532,43 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
                 "place": place,
             }
         raise DataError("统计表需要关联行政区后才能成图；请先转成点位或面图层再上传")
+
+    # 指标是 GDP / 人口这类社会经济统计量时，优先用 demo_data/stats/ 的预置数据集
+    # （真实公开统计，按 {adcode}_{指标} 命名），不需要用户准备 CSV。
+    stat_key = preset_stat_key(field_name)
+    if stat_key is not None:
+        admin_layer = load_admin(place, online=_allow_online())
+        adcode = str(admin_layer.meta.get("adcode") or "")
+        preset = load_preset_stats(adcode, stat_key)
+        if preset is not None:
+            stats_df, stats_name = preset
+            table_layer = DataLayer(
+                kind="table",
+                name=stats_name,
+                source=f"预置统计数据 {stats_name}",
+                summary=f"{stats_name}：{len(stats_df)} 行预置统计值",
+                table=stats_df,
+            )
+            joined, actual_field = _join_upload_table(table_layer, admin_layer, field_name)
+            profile = _surface_profile(joined, actual_field)
+            return {
+                "summary": profile.summary,
+                "decision": profile.decision,
+                "reason_lines": list(profile.reason_lines),
+                "profile": profile,
+                "admin": joined,
+                "overlay_base": None,
+                "points": None,
+                "layer": joined,
+                "field": actual_field,
+                "date": date,
+                "place": place,
+            }
+        raise DataError(
+            f"{place} 没有预置的 {field_name} 统计数据（demo_data/stats/ 下没有 "
+            f"{adcode}_{stat_key}*.csv）。可以改为上传一份「行政区名 + {field_name}」的 CSV，"
+            "或先用其它指标（如 PM2.5）。"
+        )
 
     admin, points = resolve_inputs(place, date, field_name, online=_allow_online())
     profile = profile_points(points, field_name=field_name, study_area=admin)

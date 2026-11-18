@@ -76,6 +76,9 @@ export const FIELD_OPTIONS = [
   'O3_8h_24h',
   'CO_24h',
   'AQI',
+  // 社会经济统计指标：走 demo_data/stats/ 的预置数据集（如江苏各市 GDP），
+  // 或配合上传的统计表使用。
+  'GDP',
 ]
 
 export const MAP_TYPES = ['choropleth', 'point', 'idw', 'buffer', 'overlay']
