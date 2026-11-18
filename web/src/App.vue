@@ -4,6 +4,7 @@ import { createSession, deleteSession, fetchStatsBalance, health, listSessions }
 import type { SessionMeta } from './types'
 import ChatView from './components/ChatView.vue'
 import FormView from './components/FormView.vue'
+import SettingsDialog from './components/SettingsDialog.vue'
 
 const view = ref<'chat' | 'form'>('chat')
 const llmConfigured = ref(false)
@@ -13,6 +14,7 @@ const chatKey = ref(0)
 const sessions = ref<SessionMeta[]>([])
 const currentSessionId = ref<string | null>(null)
 const sidebarOpen = ref(false)
+const settingsOpen = ref(false)
 // 会话接口就绪前不渲染 ChatView，避免它先按空 ID 挂载、随后又换 ID 重载。
 const sessionReady = ref(false)
 
@@ -70,16 +72,21 @@ function switchView(next: 'chat' | 'form'): void {
   sidebarOpen.value = false
 }
 
-onMounted(async () => {
-  currentSessionId.value = await startSession()
-  sessionReady.value = true
-  await loadSessions()
+/** 刷新模型/余额状态；设置保存后与页面加载时都会调用。 */
+async function refreshStatus(): Promise<void> {
   try {
     llmConfigured.value = (await health()).llm_configured
     statsBalance.value = await fetchStatsBalance()
   } catch {
     llmConfigured.value = false
   }
+}
+
+onMounted(async () => {
+  currentSessionId.value = await startSession()
+  sessionReady.value = true
+  await loadSessions()
+  await refreshStatus()
 })
 </script>
 
@@ -119,6 +126,7 @@ onMounted(async () => {
       <div v-if="statsBalance.configured" class="hint">
         数据积分：{{ statsBalance.available ? (statsBalance.points_balance ?? 0) : '—' }}
       </div>
+      <button class="side-action side-settings" @click="settingsOpen = true">⚙ 设置 API</button>
     </aside>
 
     <main class="main">
@@ -136,5 +144,11 @@ onMounted(async () => {
       />
       <FormView v-else-if="view === 'form'" :llm-configured="llmConfigured" />
     </main>
+
+    <SettingsDialog
+      :open="settingsOpen"
+      @close="settingsOpen = false"
+      @saved="refreshStatus"
+    />
   </div>
 </template>

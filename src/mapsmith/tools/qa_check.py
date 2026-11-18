@@ -369,6 +369,24 @@ def _r08(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     return PASS, "连续量使用单色渐变且未使用彩虹色", {}
 
 
+# 判定「这是不是一个可用的中文字体」。R09 原先只认微软雅黑/黑体，但项目打包分发
+# 的是 Noto Sans SC（跨平台一致），按白名单判会把正确配置判成 FAIL。
+_CJK_FONT_MARKERS = (
+    "microsoft yahei",
+    "simhei",
+    "noto sans sc",
+    "noto sans cjk",
+    "source han sans",
+    "pingfang sc",
+    "wenquanyi",
+)
+
+
+def _is_cjk_font(name: str) -> bool:
+    lowered = name.strip().lower()
+    return any(marker in lowered for marker in _CJK_FONT_MARKERS)
+
+
 def _r09(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     font = _mapping(spec.get("font")) or _mapping(spec.get("fonts"))
     render_meta = _mapping(spec.get("render_meta"))
@@ -386,8 +404,8 @@ def _r09(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
         }
 
     sans_list = [_text(item) for item in _as_list(sans)]
-    if not any(item in {"Microsoft YaHei", "SimHei"} for item in sans_list):
-        return FAIL, "font.sans-serif 未包含 Microsoft YaHei 或 SimHei", {
+    if not any(_is_cjk_font(item) for item in sans_list):
+        return FAIL, "font.sans-serif 未包含可用的中文字体", {
             "font.sans_serif": ["Microsoft YaHei", "SimHei"],
             "font.unicode_minus": False,
         }

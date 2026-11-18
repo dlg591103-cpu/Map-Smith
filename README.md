@@ -64,6 +64,8 @@ Map Smith 提供第三条路：用日常语言描述需求，几分钟内拿到�
     -   Windows PowerShell：`.\run.ps1`
     -   macOS / Linux：`./run.sh`
 4.  浏览器打开 [http://127.0.0.1:8501](http://127.0.0.1:8501)。
+5.  点侧栏底部 **「⚙ 设置 API」** 填入自己的 Key（见[配置 API Key](#配置-api-key推荐在界面内完成)）。
+    不填也能用：表单模式 + 内置离线数据可以直接出图。
 
 首次运行会自动创建 `.venv` 并按 `src/requirements.lock` 安装依赖，需要几分钟。若 Windows 执行策略阻止脚本，改用：
 
@@ -87,6 +89,7 @@ docker compose up --build
 ```
 
 浏览器打开 [http://127.0.0.1:8501](http://127.0.0.1:8501)。产物（PNG / PDF）会写入宿主机 `out/` 目录。
+首次使用同样在侧栏 **「⚙ 设置 API」** 里填 Key（容器内写的是挂载的 `.env`）。
 
 ### 方式三：从源码运行
 
@@ -112,20 +115,65 @@ PYTHONPATH=src ./.venv/bin/python -m mapsmith --port 8501
 
 前端构建产物 `web/dist/` 已入库，运行时不需要 Node。只有修改前端时才需要进入 `web/` 执行 `npm install && npm run dev`。
 
-### 配置大模型（可选）
+### 配置 API Key（推荐在界面内完成）
 
-默认使用本机 [Ollama](https://ollama.com/)（`http://127.0.0.1:11434/v1`，模型 `qwen2.5:3b`）。使用一句话模式前，先启动 Ollama 并拉取模型：
+启动后浏览器打开 [http://127.0.0.1:8501](http://127.0.0.1:8501)，点侧栏底部的 **「⚙ 设置 API」**，
+直接填写并保存即可生效——不用重启、不用手改文件。
 
-```bash
-ollama pull qwen2.5:3b
-```
+需要两类 Key，按你要用的功能选填：
 
-也可以接入任意 OpenAI 兼容 API。在项目根目录创建 `.env`：
+| 配置项 | 用途 | 不填的后果 |
+| --- | --- | --- |
+| **对话模型（LLM）** | 一句话生成地图 | 用不了对话模式，**但表单模式照常出图** |
+| **统计数据（聚汇）** | GDP / 人口等社会经济指标 | 空气质量图照常，**统计类指标做不了** |
+
+**两者都不填也能用**：表单模式 + 内置离线数据（徐州多日空气质量、江苏各市 GDP、
+区县 PM2.5）可以完整出图。
+
+#### 对话模型怎么填
+
+两条路选一条：
+
+**A. 本机 Ollama（免费、离线）**
+
+1.  安装 [Ollama](https://ollama.com/)
+2.  `ollama pull qwen2.5:3b`
+3.  `ollama serve`
+4.  设置窗口**保持默认**：地址 `http://127.0.0.1:11434/v1`、模型 `qwen2.5:3b`，
+    密钥填任意非空值（如 `ollama`）
+
+**B. 云端 API（DeepSeek / OpenAI / 任意 OpenAI 兼容服务）**
+
+在设置窗口填三项，以 DeepSeek 为例：
+
+| 字段 | 填什么 |
+| --- | --- |
+| API 地址 | `https://api.deepseek.com/v1` |
+| 模型名 | `deepseek-chat` |
+| 密钥 | 你自己的 key |
+
+> ⚠️ **注意**：默认配置指向本机 Ollama。没装 Ollama 时界面仍显示「模型：已配置」
+> （三项都有默认值），但发对话会提示「本地模型未启动」——这时按 B 填云端 API 即可。
+
+#### 统计数据怎么填
+
+1.  到 [聚汇数据](https://www.gotohui.com/member/api-keys) 注册并创建 API Key
+2.  设置窗口粘贴保存
+
+省级榜单免费；画到「市级下辖区县」按次消耗积分（1 积分买断一个指标 365 天）。
+
+#### 也可以手改 `.env`（适合批量部署 / 容器）
+
+在项目根目录创建 `.env`：
+
 ```
 MAPSMITH_LLM_BASE_URL=https://your-provider.example/v1
 MAPSMITH_LLM_API_KEY=your-api-key
 MAPSMITH_LLM_MODEL=your-model-name
+MAPSMITH_STATS_API_KEY=your-gotohui-key
 ```
+
+界面内设置窗口保存时写的就是这个文件，两种方式等价。
 
 未配置或模型不可用时，界面会给出中文提示，仍可用表单模式 + 内置离线数据出图。
 

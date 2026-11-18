@@ -77,7 +77,12 @@ def _merge_data_summary(spec: dict[str, Any], data_summary: Any) -> dict[str, An
     if not data_summary:
         return spec
     merged = copy.deepcopy(spec)
-    health = merged.setdefault("data_health", {})
+    # spec 里 data_health 可能是 None（字段存在但没填），setdefault 不会替换 None，
+    # 直接赋值会 TypeError；这里显式判一次类型。
+    health = merged.get("data_health")
+    if not isinstance(health, dict):
+        health = {}
+        merged["data_health"] = health
     if isinstance(data_summary, Mapping):
         if "nan_count" in data_summary:
             health["nan_count"] = data_summary["nan_count"]

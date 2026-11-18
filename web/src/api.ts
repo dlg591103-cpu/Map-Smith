@@ -1,4 +1,4 @@
-import type { Message, SessionDetail, SessionMeta, UploadInfo } from './types'
+import type { Message, SessionDetail, SessionMeta, SettingsInfo, SettingsPatch, UploadInfo } from './types'
 
 export class ApiError extends Error {}
 
@@ -112,8 +112,7 @@ export async function fetchStatsBalance(): Promise<StatsBalance> {
 }
 // ---- 历史会话 ----
 
-export async function createSession(): Promise<SessionMeta> {
-  const response = await fetch('/api/sessions', { method: 'POST' })
+export async function createSession(): Promise<SessionMeta> {  const response = await fetch('/api/sessions', { method: 'POST' })
   if (!response.ok) throw new ApiError(await readError(response))
   return (await response.json()) as SessionMeta
 }
@@ -151,4 +150,22 @@ export async function deleteSession(id: string): Promise<void> {
   const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
   // 记录已不存在也当作删掉了，不必把 404 抛给用户。
   if (!response.ok && response.status !== 404) throw new ApiError(await readError(response))
+}
+
+// ---- API 配置 ----
+
+export async function fetchSettings(): Promise<SettingsInfo> {
+  const response = await fetch('/api/settings')
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SettingsInfo
+}
+
+export async function saveSettings(patch: SettingsPatch): Promise<SettingsInfo> {
+  const response = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!response.ok) throw new ApiError(await readError(response))
+  return (await response.json()) as SettingsInfo
 }

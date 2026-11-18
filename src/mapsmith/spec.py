@@ -146,6 +146,28 @@ class Layout(BaseModel):
         return value
 
 
+class RenderMeta(BaseModel):
+    """渲染层实际采用的字体设置，作为审查规则 R09 的证据。
+
+    之前 qa_check 要读 `spec.render_meta`，但 MapSpec 里没有这个字段，
+    R09 永远只能给 WARN「未提供字体配置证据」。这里把渲染层的真实选择记录下来。
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    font_sans_serif: list[str] = Field(default_factory=list)
+    unicode_minus: bool = False
+
+
+class DataHealth(BaseModel):
+    """数据体检的缺失值统计，作为审查规则 R10 的依据。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    nan_count: int | None = None
+    summary: str = ""
+
+
 class MapSpec(BaseModel):
     """制图决策产物。字段见 docs/facts/05；额外字段一律拒绝。"""
 
@@ -162,6 +184,10 @@ class MapSpec(BaseModel):
     data_source_note: str = Field(min_length=1)
     crs: str = "EPSG:4490"
     notes: list[str] = Field(default_factory=list)
+    # 审查证据：渲染层实际字体（R09）与数据缺失统计（R10）。
+    # 之前这两个字段不存在，qa_check 读不到只能恒给 WARN。
+    render_meta: RenderMeta | None = None
+    data_health: DataHealth | None = None
 
     @field_validator("crs")
     @classmethod

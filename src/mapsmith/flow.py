@@ -1110,8 +1110,40 @@ def _map_type_hint(text: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def _review_evidence(loaded: Mapping[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """给审查规则准备证据：渲染层实际字体（R09）与数据缺失统计（R10）。
+
+    这两项此前没有载体，`qa_check` 读不到只能恒给 WARN「未提供…证据」。字体名取
+    渲染层真正会用的那个（`load_chinese_font` 的选择结果），不写死系统字体名。
+    """
+    render_meta: dict[str, Any] | None = None
+    try:
+        from .render.fonts import load_chinese_font
+
+        render_meta = {"font_sans_serif": [load_chinese_font()], "unicode_minus": False}
+    except Exception:  # noqa: BLE001 - 字体加载失败交给渲染阶段报明确错误
+        render_meta = None
+
+    data_health: dict[str, Any] | None = None
+    profile = loaded.get("profile") if isinstance(loaded, Mapping) else None
+    total = getattr(profile, "total", None)
+    n_valid = getattr(profile, "n_valid", None)
+    if isinstance(total, int) and isinstance(n_valid, int):
+        nan_count = max(0, total - n_valid)
+        base = str(getattr(profile, "summary", "") or "").strip()
+        # R10 要求 notes/health 里明确说明缺失值处理；只报完整度不够，
+        # 补一句「缺失 N 项按缺测处理」让规则有据可依。
+        tail = f"缺失 {nan_count} 项按缺测处理" if nan_count else ""
+        data_health = {
+            "nan_count": nan_count,
+            "summary": "；".join(part for part in (base, tail) if part),
+        }
+    return render_meta, data_health
+
+
 def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: Mapping[str, Any]) -> MapSpec:
     """把 Cartographer 的决策与本地确定性字段合成合法 MapSpec。"""
+    evidence = _review_evidence(loaded)
     place = request["place"]
     date = _title_date(request["time"], loaded)
     # 字段名以「加载后实际拿到的字段」为准：统计指标（人均GDP → renjun）与空气质量
@@ -1195,6 +1227,8 @@ def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: 
             "data_source_note": f"{layer.source}；更新时间：{date}",
             "crs": "EPSG:4490",
             "notes": notes,
+            "render_meta": evidence[0],
+            "data_health": evidence[1],
         }
     )
 
@@ -1273,6 +1307,7 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
 
     T25 起支持 buffer / overlay：先做确定性分析，再对结果面图层分级设色。
     """
+    evidence = _review_evidence(loaded)
     request = parse.request
     place = request["place"]
     date = request["time"]
@@ -1353,6 +1388,8 @@ def _form_spec(parse: RequestParse, form: Mapping[str, Any], loaded: Mapping[str
             "data_source_note": f"{layer.source}；更新时间：{date}",
             "crs": "EPSG:4490",
             "notes": notes,
+            "render_meta": evidence[0],
+            "data_health": evidence[1],
         }
     )
 
@@ -1490,6 +1527,10 @@ def _to_mapspec(spec: Any) -> MapSpec:
         "data_source_note",
         "crs",
         "notes",
+        # 审查证据（R09 字体 / R10 缺失值）：返工 patch 可能改动它们，
+        # 过滤时保留，否则重新渲染前会丢。
+        "render_meta",
+        "data_health",
     }
     clean = {key: value for key, value in data.items() if key in allowed}
 
