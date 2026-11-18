@@ -177,11 +177,20 @@ def load_admin(
         if not online:
             raise DataError(
                 f"没有 {resolved.full_name} 的离线边界文件，且已禁用联网；"
-                "请把 {adcode}_full.json 放入 demo_data/boundaries/"
+                f"请把 {adcode}_full.json 放入 demo_data/boundaries/"
             )
         text = _download(
             f"https://geo.datav.aliyun.com/areas_v3/bound/{adcode}_full.json", timeout
         )
+        # 落盘缓存：边界取过一次就够，之后离线也能重画。写的是 DataV 原始返回，
+        # 与已入库的 320300_full.json 等同源同格式；纠偏在加载之后做，不污染缓存。
+        try:
+            cached = get_settings().demo_data_dir / "boundaries" / f"{adcode}_full.json"
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            if not cached.exists():
+                cached.write_text(text, encoding="utf-8")
+        except OSError:
+            pass  # 缓存失败不影响本次出图
         gdf = gpd.read_file(text_io.StringIO(text))
         source_note = "DataV GeoAtlas 实时边界"
 
