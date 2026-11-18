@@ -335,15 +335,31 @@ _TABLE_KEY_HINTS = (
 )
 # 猜「哪一列是数值」的列名线索（仅在多个数值列时用来消歧）。
 _TABLE_VALUE_HINTS = ("gdp", "人口", "population", "总量", "产值", "数值", "value", "指标")
+# 行政区名后缀：不同数据源常一边带、一边不带（「杭州市」↔「杭州」）。
+_ADMIN_SUFFIXES = ("特别行政区", "自治州", "地区", "省", "市", "盟", "区", "县")
+
+
+def _base_admin_name(name: Any) -> str:
+    """去掉行政区类型后缀，用于跨数据源的宽松名称匹配。"""
+    text = str(name or "").strip()
+    for suffix in _ADMIN_SUFFIXES:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return text[: -len(suffix)]
+    return text
 
 
 def _pick_table_key(stats: pd.DataFrame, boundary: Any) -> str | None:
-    """挑出统计表里能与边界 ``name`` 对上的行政区名列；匹配率需 ≥ 50%。"""
+    """挑出统计表里能与边界 ``name`` 对上的行政区名列；匹配率需 ≥ 50%。
+
+    精确匹配优先；同时用去后缀的宽松匹配兜底（数据源常给「杭州」而边界是
+    「杭州市」），两种取较高者。
+    """
     names: set[str] = set()
     if boundary is not None and "name" in getattr(boundary, "columns", []):
         names = {str(v).strip() for v in boundary["name"].dropna()}
     if not names:
         return None
+    names_base = {_base_admin_name(name) for name in names}
 
     best_col: str | None = None
     best_rate = 0.0
@@ -355,6 +371,8 @@ def _pick_table_key(stats: pd.DataFrame, boundary: Any) -> str | None:
         if not values:
             continue
         rate = len(values & names) / len(values)
+        rate_base = len({_base_admin_name(v) for v in values} & names_base) / len(values)
+        rate = max(rate, rate_base)
         # 同分时优先列名含线索词的列
         hinted = any(hint in str(column).lower() for hint in _TABLE_KEY_HINTS)
         if rate > best_rate or (rate == best_rate and hinted and best_col is not None):
@@ -433,6 +451,55 @@ def _join_upload_table(
     return joined, value_col
 
 
+def _cache_stats_frame(
+    frame: pd.DataFrame, adcode: str, stat_key: str
+) -> str:
+    """把联网取到的统计数据落盘到 demo_data/stats/，返回文件名。"""
+    stamp = time.strftime("%Y%m%d")
+    filename = f"{adcode}_{stat_key}_{stamp}.csv"
+    try:
+        target = get_settings().demo_data_dir / "stats" / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(target, index=False, encoding="utf-8-sig")
+    except OSError:
+        pass
+    return filename
+
+
+def _load_stats_from_api(
+    place: str,
+    field_name: str,
+    stat_key: str,
+    adcode: str,
+    admin_layer: DataLayer,
+) -> tuple[pd.DataFrame, str] | None:
+    """用聚汇数据开放 API 的免费榜单取「某地区下辖各市/区县」的指标值。
+
+    需要 ``MAPSMITH_STATS_API_KEY``；未配置或没匹配到榜单时返回 None。
+    只用免费的 ``/ranking`` 接口，不调用扣积分的 ``/data/{id}``。
+    """
+    from .tools.stats_api import fetch_region_stats, stats_api_key
+
+    if not stats_api_key():
+        return None
+    boundary = admin_layer.gdf
+    if boundary is None or "name" not in boundary.columns:
+        return None
+    names = {str(v).strip() for v in boundary["name"].dropna()}
+    if not names:
+        return None
+    try:
+        got = fetch_region_stats(stat_key, adcode, names)
+    except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
+        return None
+    if got is None:
+        return None
+    frame, source = got
+    frame = frame.rename(columns={"value": stat_key})
+    filename = _cache_stats_frame(frame, adcode, stat_key)
+    return frame, f"{source}（已缓存 {filename}）"
+
+
 def _search_online_stats(
     place: str,
     field_name: str,
@@ -462,14 +529,7 @@ def _search_online_stats(
         return None
     frame, source = got
     frame = frame.rename(columns={"value": stat_key})
-    stamp = time.strftime("%Y%m%d")
-    filename = f"{adcode}_{stat_key}_{stamp}.csv"
-    try:
-        target = get_settings().demo_data_dir / "stats" / filename
-        target.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_csv(target, index=False, encoding="utf-8-sig")
-    except OSError:  # 缓存失败不影响本次出图
-        pass
+    filename = _cache_stats_frame(frame, adcode, stat_key)
     return frame, f"{source}（已缓存 {filename}）"
 
 
@@ -592,6 +652,10 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
         admin_layer = load_admin(place, online=_allow_online())
         adcode = str(admin_layer.meta.get("adcode") or "")
         preset = load_preset_stats(adcode, stat_key)
+        if preset is None:
+            # 没有预置数据：配了聚汇数据 API Key 就用它（榜单接口免费），
+            # 命中后缓存到 demo_data/stats/，下次直接走预置路径。
+            preset = _load_stats_from_api(place, field_name, stat_key, adcode, admin_layer)
         if preset is None and _allow_online_stats_search():
             # 实验性兜底：显式开启 MAPSMITH_SEARCH_ONLINE=1 时才联网检索。
             preset = _search_online_stats(place, field_name, stat_key, adcode, admin_layer)
