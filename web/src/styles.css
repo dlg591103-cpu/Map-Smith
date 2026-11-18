@@ -193,7 +193,7 @@ button { cursor: pointer; }
 }
 
 .chat {
-  max-width: 760px;
+  max-width: 940px;
   margin: 0 auto;
   padding: 26px 20px 18px;
 }
@@ -408,7 +408,7 @@ pre {
 }
 
 .composer {
-  max-width: 760px;
+  max-width: 940px;
   margin: 0 auto;
   display: flex;
   align-items: flex-end;
@@ -471,7 +471,7 @@ pre {
 }
 
 .attachments {
-  max-width: 760px;
+  max-width: 940px;
   margin: 0 auto 6px;
   display: flex;
   gap: 6px;
@@ -479,7 +479,7 @@ pre {
 }
 
 .form-page {
-  max-width: 760px;
+  max-width: 940px;
   margin: 0 auto;
   padding: 28px 20px 40px;
 }
@@ -577,4 +577,36 @@ pre {
   .mobile-toggle { display: block; }
   .form-grid { grid-template-columns: 1fr; }
   .hero { padding-top: 8vh; }
+}
+/* 积分确认条：取数要花积分时，在输入框上方明确提示成本并给一个确认按钮。 */
+.cost-confirm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto 8px;
+  max-width: 940px;
+  padding: 10px 14px;
+  border: 1px solid #f0c36d;
+  border-radius: 10px;
+  background: #fffaf0;
+  font-size: 13px;
+  color: #7a5b13;
+}
+.cost-confirm-text {
+  flex: 1;
+  line-height: 1.5;
+}
+.cost-confirm-btn {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #d9a441;
+  background: #f6c453;
+  color: #4a3510;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cost-confirm-btn:hover {
+  background: #f2b83a;
 }

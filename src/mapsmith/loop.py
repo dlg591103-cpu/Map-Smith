@@ -25,6 +25,26 @@ FIELD_QUESTIONS: dict[str, str] = {
 REJECT_QUESTION = "当前区域与指标的有效站数不足 3 个，换一个指标或换一个区域再试。"
 
 
+class NeedsConfirmation(Exception):
+    """取数需要用户确认（通常是要花积分）。
+
+    由 `load_fn` 抛出，`run_loop` 捕获后转成 ``needs_input``：把「要花多少钱、
+    当前余额、是否继续」作为追问抛给用户，而不是当成数据加载失败报红。
+    """
+
+    def __init__(
+        self,
+        questions: list[str],
+        *,
+        summary: str = "需要确认后才能继续",
+        detail: str = "",
+    ) -> None:
+        super().__init__(summary)
+        self.questions = questions
+        self.summary = summary
+        self.detail = detail
+
+
 @dataclass
 class LoopResult:
     """一次编排的完整结果；`status` 只有三种终止态。"""
@@ -145,6 +165,16 @@ def run(
 
     try:
         loaded = load_fn(request)
+    except NeedsConfirmation as exc:
+        # 取数要花积分（聚汇区县级数据 1 积分/指标）：先反问用户是否确认，
+        # 不把「余额不足」当成加载失败——那样用户只会看到一个红色错误。
+        return LoopResult(
+            status="needs_input",
+            elapsed=elapsed(),
+            questions=list(exc.questions)[: settings.max_clarify_questions],
+            summary=exc.summary,
+            notes=[exc.detail] if exc.detail else [],
+        )
     except Exception as exc:  # noqa: BLE001 - 对外只暴露原因，不吞错
         return LoopResult(
             status="failed",

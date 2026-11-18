@@ -40,10 +40,14 @@ class ChatBody(BaseModel):
     # 同一话题下此前几轮用户原话（追问场景）。后端把它拼进解析上下文，
     # 避免每轮只看到当前半句、把已经说过的区域/时间/指标重复追问。
     history: list[str] = Field(default_factory=list)
+    # 用户已确认承担取数积分（区县级统计数据 1 积分/指标）后置 true。
+    confirm_cost: bool = False
     upload_id: str | None = None
 
 
 class FormBody(BaseModel):
+    # 用户已确认承担取数积分后置 true（见 ChatBody.confirm_cost）。
+    confirm_cost: bool = False
     place: str = ""
     time: str = ""
     metric: str = ""
@@ -250,6 +254,7 @@ def chat(body: ChatBody) -> StreamingResponse:
         run = flow.run_one_sentence(
             body.message,
             history=body.history,
+            confirm_cost=body.confirm_cost,
             upload=record,
             output_dir=current.output_dir,
             request_id=request_id,
@@ -274,6 +279,7 @@ def form(body: FormBody) -> StreamingResponse:
 
         run = flow.run_form(
             body.model_dump(),
+            confirm_cost=body.confirm_cost,
             upload=record,
             output_dir=current.output_dir,
             request_id=request_id,

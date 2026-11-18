@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { confirmCrs as confirmCrsApi, getSession, saveSession, streamPost, uploadFile } from '../api'
 import type { CrsRequired, Message, ResultPayload, UploadInfo } from '../types'
 import Composer from './Composer.vue'
@@ -28,6 +28,17 @@ const suggestions = [
   '徐州 2026-11-01 的 PM10 点图',
 ]
 
+/** 最后一条助手消息里「要花积分确认」的追问；有值时显示确认按钮。 */
+const costQuestion = computed(() => {
+  const last = [...messages.value].reverse().find((message) => message.role === 'assistant')
+  const questions = last?.result?.questions || []
+  return questions.find((item) => String(item).includes('积分')) || ''
+})
+
+/** 用户点「确认购买」：带 confirm_cost 重发，后端才会真正扣分取数。 */
+function confirmCost(): void {
+  send('确认购买', null, true)
+}
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -155,7 +166,7 @@ async function confirmCrs(crs: string): Promise<void> {
   }
 }
 
-async function send(text: string, uploadIdOverride?: string | null): Promise<void> {
+async function send(text: string, uploadIdOverride?: string | null, confirmCost = false): Promise<void> {
   if (busy.value) return
   if (attachment.value?.crs_status === 'missing' && uploadIdOverride === undefined) {
     pendingCrs.value = crsInfo(attachment.value)
@@ -170,13 +181,13 @@ async function send(text: string, uploadIdOverride?: string | null): Promise<voi
   addMessage('user', attachmentName ? `${content}\n📎 ${attachmentName}` : content)
   const assistant = addMessage('assistant', '')
   busy.value = true
-  lastRequest.value = { message: content, uploadId: uploadId || null }
+  lastRequest.value = { message: content, uploadId: uploadId || null, confirmCost }
 
   // 带着追问上下文发送：上一轮是追问时，把之前说过的话一起交给后端。
   const history = [...pendingContext.value]
 
   try {
-    await streamPost('/api/chat', { message: content, history, upload_id: uploadId }, (event, data) => {
+    await streamPost('/api/chat', { message: content, history, upload_id: uploadId, confirm_cost: confirmCost }, (event, data) => {
       if (event === 'stage') {
         assistant.stage = String(data.label || data.stage || '处理中')
       } else if (event === 'crs_required') {
@@ -264,6 +275,11 @@ onMounted(() => {
 
     <div v-if="!llmConfigured" class="hint" style="text-align: center; padding-bottom: 6px">
       未配置模型：请设置 MAPSMITH_LLM_BASE_URL / MAPSMITH_LLM_API_KEY / MAPSMITH_LLM_MODEL，或在「高级表单」中出图。
+    </div>
+
+    <div v-if="costQuestion && !busy" class="cost-confirm">
+      <span class="cost-confirm-text">{{ costQuestion }}</span>
+      <button class="cost-confirm-btn" type="button" @click="confirmCost">确认购买</button>
     </div>
 
     <Composer

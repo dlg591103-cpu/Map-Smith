@@ -509,7 +509,7 @@ def test_form_spec_rejects_overlay_without_face_layer():
 def test_run_form_goes_through_loop(monkeypatch, tmp_path: Path):
     loaded = make_loaded()
     fake_render = FakeRender(tmp_path)
-    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload: loaded)
+    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload, **_kwargs: loaded)
     monkeypatch.setattr(flow, "run_render", fake_render)
 
     run = flow.run_form(
@@ -536,7 +536,7 @@ def test_run_form_goes_through_loop(monkeypatch, tmp_path: Path):
 def test_run_one_sentence_parses_then_runs_loop(monkeypatch, tmp_path: Path):
     loaded = make_loaded()
     fake_render = FakeRender(tmp_path)
-    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload: loaded)
+    monkeypatch.setattr(flow, "_load_layers", lambda _request, _upload, **_kwargs: loaded)
     monkeypatch.setattr(flow, "run_render", fake_render)
 
     calls: list[str] = []
@@ -569,7 +569,7 @@ def test_run_one_sentence_parses_then_runs_loop(monkeypatch, tmp_path: Path):
 
 def test_run_one_sentence_missing_field_returns_questions_without_loading(monkeypatch):
     loaded_calls: list[int] = []
-    monkeypatch.setattr(flow, "_load_layers", lambda *_args: loaded_calls.append(1) or make_loaded())
+    monkeypatch.setattr(flow, "_load_layers", lambda *_args, **_kwargs: loaded_calls.append(1) or make_loaded())
 
     def fake_llm(system_prompt: str, payload):
         return {"place": "徐州"}
@@ -583,7 +583,7 @@ def test_run_one_sentence_missing_field_returns_questions_without_loading(monkey
 
 def test_run_one_sentence_reject_returns_needs_input(monkeypatch, tmp_path: Path):
     loaded = make_loaded("reject")
-    monkeypatch.setattr(flow, "_load_layers", lambda *_args: loaded)
+    monkeypatch.setattr(flow, "_load_layers", lambda *_args, **_kwargs: loaded)
     monkeypatch.setattr(flow, "run_render", FakeRender(tmp_path))
 
     def fake_llm(system_prompt: str, payload):

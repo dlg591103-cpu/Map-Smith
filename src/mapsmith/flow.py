@@ -32,7 +32,7 @@ from .agents.reviewer import review
 from .config import Settings, get_settings
 from .io.models import DataError, DataLayer, FieldMissing
 from .io.uploads import ensure_crs, parse_upload
-from .loop import FIELD_QUESTIONS, LoopResult
+from .loop import FIELD_QUESTIONS, LoopResult, NeedsConfirmation
 from .loop import run as loop_run
 from .spec import MapSpec
 from .tools.analyze import buffer_layer, buffer_metric_stats, clip_layer, overlay_layer
@@ -567,14 +567,17 @@ def _load_county_stats(
     place: str,
     field_name: str,
     admin_layer: DataLayer,
+    *,
+    confirm: bool = False,
 ) -> tuple[pd.DataFrame, str] | None:
     """市级：取「该市下辖各区县」的某项指标。
 
     聚汇的免费榜单只到地级市，区县级数据只能走「搜索指标 → 按 id 取数」，而取数
     按「买断限期访问权限」计费（1 积分/指标 365 天）。因此行为分三种：
 
-    - 有积分：正常返回 ``(DataFrame, 来源说明)``；
-    - 没积分：抛 `DataError` 说明需要多少积分、以及可以改用上传 CSV；
+    - 有积分且 ``confirm=True``：正常返回 ``(DataFrame, 来源说明)``；
+    - 需要用户确认（``confirm=False`` 或余额不足）：抛 `NeedsConfirmation`，
+      由编排层转成追问，把「要花几分、余额多少」告诉用户；
     - 搜不到该指标：返回 None，由上层继续尝试其它路径。
     """
     from .tools.stats_api import fetch_county_stats, stats_api_key
@@ -589,19 +592,23 @@ def _load_county_stats(
         return None
     try:
         result = fetch_county_stats(
-            place, field_name, county_names, metric_label=field_name, confirm=True
+            place, field_name, county_names, metric_label=field_name, confirm=confirm
         )
     except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
         return None
     if isinstance(result, dict):
-        # 报价：余额不足（或首次需确认）时聚汇返回 need_authorization
+        # 报价：首次取数或余额不足时聚汇返回 need_authorization
         quote = str(result.get("message") or "").strip()
         cost = result.get("points_cost")
         balance = result.get("points_balance")
-        raise DataError(
-            f"区县级统计数据需要积分购买：{quote or '聚汇返回需授权'}"
-            f"（本次费用 {cost} 积分，当前余额 {balance}）。"
-            "请到聚汇数据会员中心充值后重试；也可以直接上传一份「区县名 + 数值」的 CSV 出图。"
+        kind = "余额不足" if isinstance(balance, int) and isinstance(cost, int) and balance < cost else "需确认"
+        raise NeedsConfirmation(
+            [
+                f"画「{place}各区县{field_name}」需要 {cost} 积分（{kind}，当前余额 {balance}）。"
+                "确认购买并继续吗？",
+            ],
+            summary=f"需要 {cost} 积分确认",
+            detail=quote or "聚汇数据返回需授权",
         )
     return result
 
@@ -691,7 +698,12 @@ def _load_overlay_base(place: str) -> DataLayer | None:
         return None
 
 
-def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dict[str, Any]:
+def _load_layers(
+    request: Mapping[str, str],
+    upload: UploadRecord | None,
+    *,
+    confirm_cost: bool = False,
+) -> dict[str, Any]:
     place = request["place"]
     date = request["time"]
     field_name = request["metric"]
@@ -772,7 +784,7 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
         if preset is None and level == "city":
             # 市级边界下辖的是「区县」，而聚汇没有区县级榜单，只能走
             # 「搜索指标 → 按 id 取数」；取数要 1 积分/指标（买断 365 天）。
-            preset = _load_county_stats(place, field_name, admin_layer)
+            preset = _load_county_stats(place, field_name, admin_layer, confirm=confirm_cost)
         if preset is None and level != "city":
             # 没有预置数据：配了聚汇数据 API Key 就用它（榜单接口免费），
             # 命中后缓存到 demo_data/stats/，下次直接走预置路径。
@@ -1388,13 +1400,14 @@ def _make_load_fn(
     upload: UploadRecord | None,
     state: dict[str, Any],
     on_stage: Callable[[str], None] | None = None,
+    confirm_cost: bool = False,
 ) -> Callable:
     request = dict(parse.request)
     emit = on_stage or (lambda _stage: None)
 
     def load(_request: Mapping[str, Any]) -> dict[str, Any]:
         emit("loading")
-        loaded = _load_layers(request, upload)
+        loaded = _load_layers(request, upload, confirm_cost=confirm_cost)
         state["loaded"] = loaded
         return loaded
 
@@ -1588,6 +1601,7 @@ def run_one_sentence(
     timeout: float | None = None,
     clock: Callable[[], float] | None = None,
     on_stage: Callable[[str, str], None] | None = None,
+    confirm_cost: bool = False,
 ) -> FlowRun:
     """一句话 → 解析 → `loop.run`；缺项时直接反问，不加载数据。
 
@@ -1614,7 +1628,7 @@ def run_one_sentence(
     state: dict[str, Any] = {}
     result = loop_run(
         parse.request,
-        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit),
+        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit, confirm_cost=confirm_cost),
         map_fn=_make_llm_map_fn(parse, llm_callable=caller, on_stage=emit, user_text=text),
         render_fn=_make_render_fn(
             state,
@@ -1639,6 +1653,7 @@ def run_form(
     timeout: float | None = None,
     clock: Callable[[], float] | None = None,
     on_stage: Callable[[str, str], None] | None = None,
+    confirm_cost: bool = False,
 ) -> FlowRun:
     """表单 → `loop.run`；不调用模型。"""
     current = settings or get_settings()
@@ -1656,7 +1671,7 @@ def run_form(
     state: dict[str, Any] = {}
     result = loop_run(
         request,
-        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit),
+        load_fn=_make_load_fn(parse, upload=upload, state=state, on_stage=emit, confirm_cost=confirm_cost),
         map_fn=_make_form_map_fn(parse, form, on_stage=emit),
         render_fn=_make_render_fn(
             state,
