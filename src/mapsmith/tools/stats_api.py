@@ -27,14 +27,55 @@ import requests
 
 BASE_URL = "https://www.gotohui.com/api/open/v1"
 _TIMEOUT = 25.0
-# 指标标识 → 榜单标题里的关键词（/ranking/list 搜索用）
-_RANKING_WORDS = {"gdp": "GDP", "population": "人口"}
 # 边界层级 → 该取的榜单 slug。
 # 注意：API 只提供「全国视角」的榜单（全国各省 / 全国各地级市），**没有区县级榜单**；
 # 所以省级边界要取「全国地级市」榜再按本省各市名筛选，国家级别取「全国各省」榜。
+# 实测（2026-11-18）：全部 243 个榜单的 `/ranking/{slug}` 都能免费读到数据，
+# 即使 is_paid=true 也只是站内会员标记，不影响 API 榜单读取。
 _SLUG_BY_LEVEL = {
     "gdp": {"country": "gdp/province", "province": "gdp/city"},
     "population": {"country": "renkou/province", "province": "renkou/city"},
+}
+
+# 常见指标名 → 榜单 slug 前缀（内置常用项，省一次搜索调用）。
+# 未命中的指标会走 /ranking/list?word=... 动态搜索。
+_METRIC_SLUGS: dict[str, str] = {
+    "gdp": "gdp",
+    "人均gdp": "renjun",
+    "gdp增长率": "gdpz",
+    "人口": "renkou",
+    "常住人口": "renkou",
+    "户籍人口": "huji",
+    "城镇化率": "chengzhen",
+    "财政收入": "yshouru",
+    "一般公共预算收入": "yshouru",
+    "财政支出": "yzhichu",
+    "一般公共预算支出": "yzhichu",
+    "税收收入": "shuishou",
+    "增值税": "zengzhi",
+    "存款余额": "rmbc",
+    "住户存款": "zhuhu",
+    "进出口总额": "zong",
+    "进出口": "zong",
+    "cpi": "cpi_annual",
+    "通货膨胀率": "cpi_annual",
+    "可支配收入": "czshouru",
+    "人均可支配收入": "czshouru",
+    "工资": "zgzonger",
+    "医院数": "yiyuan",
+    "医院床位": "yiyuan_chuangwei",
+    "医生数": "yisheng",
+    "卫生技术人员": "weisheng_jishu",
+    "医疗卫生机构": "yiliao_jigou",
+    "小学生数": "xiaoxue",
+    "初中生数": "chuzhong",
+    "高中生数": "gaozhong",
+    "大学生数": "daxue",
+    "研究生数": "yanjiu",
+    "幼儿园数": "youer_school",
+    "生育率": "fertility_rate",
+    "人口自然增长率": "zengzhang",
+    "房价": "house",
 }
 _SUFFIXES = ("市", "区", "县", "自治州", "盟", "地区")
 
@@ -134,10 +175,38 @@ def _pick_slug(
     return None
 
 
+def resolve_metric_slug(metric_name: str) -> str | None:
+    """把用户/模型给的指标名映射到榜单 slug 前缀。
+
+    先用内置别名表；未命中时调 ``/ranking/list?word=...`` 动态搜索，取标题里
+    最匹配的那条（去掉层级后缀，只留前缀如 ``yshouru``）。
+    """
+    text = str(metric_name or "").strip()
+    if not text:
+        return None
+    key = re.sub(r"[\s_\-（）()]", "", text).lower()
+    if key in _METRIC_SLUGS:
+        return _METRIC_SLUGS[key]
+    # 低置信度的动态搜索：只在显式配置了 Key 时进行
+    if not stats_api_key():
+        return None
+    rankings = list_rankings(text, limit=20)
+    if not rankings:
+        return None
+    for item in rankings:
+        slug = str(item.get("slug") or "")
+        prefix = slug.split("/")[0]
+        if prefix:
+            return prefix
+    return None
+
+
 def fetch_region_stats(
     metric_key: str,
     level: str,
     admin_names: set[str],
+    *,
+    metric_label: str = "",
 ) -> tuple[pd.DataFrame, str] | None:
     """用免费的榜单接口取「目标边界下辖各行政区」的指标值。
 
@@ -145,15 +214,17 @@ def fetch_region_stats(
     - 边界是国家级别：取「全国各省」榜。
     - 区县级没有对应榜单，返回 None（由调用方提示改用预置/上传）。
 
+    ``metric_key`` 是 slug 前缀（gdp / renkou / yshouru / chengzhen …），
+    由 `resolve_metric_slug` 解析得到。
+
     返回 ``(DataFrame(district, value), 来源说明)``；未配置 Key 或筛选后不足 2 行
     时返回 None，不猜数据。
     """
-    if not stats_api_key() or not admin_names:
+    if not stats_api_key() or not admin_names or not metric_key:
         return None
-    normal_level = "province" if str(level).lower() == "province" else "country"
-    slug = _SLUG_BY_LEVEL.get(metric_key, {}).get(normal_level)
-    if slug is None:
-        return None
+    level_key = "province" if str(level).lower() == "province" else "country"
+    suffix = "city" if level_key == "province" else "province"
+    slug = f"{metric_key}/{suffix}"
     got = fetch_ranking(slug)
     if got is None:
         return None
@@ -163,7 +234,7 @@ def fetch_region_stats(
     if len(matched) < 2:
         return None
     frame = pd.DataFrame(matched).drop_duplicates(subset=["district"])
-    title = "全国各省" if normal_level == "country" else "全国各地级市"
-    label = "GDP" if metric_key == "gdp" else "常住人口"
-    source = f"聚汇数据开放API「{title}{label}排行榜」{('（单位：' + unit + '）') if unit else ''}"
+    label = metric_label or metric_key
+    scope = "全国各省" if level_key == "country" else "全国各地级市"
+    source = f"聚汇数据开放API「{scope}{label}排行榜」{('（单位：' + unit + '）') if unit else ''}"
     return frame, source

@@ -37,7 +37,12 @@ from .loop import run as loop_run
 from .spec import MapSpec
 from .tools.analyze import buffer_layer, buffer_metric_stats, clip_layer, overlay_layer
 from .tools.inspect import DataProfile, profile_points
-from .tools.load_layer import load_admin, load_preset_stats, preset_stat_key
+from .tools.load_layer import (
+    FIELD_ALIASES,
+    load_admin,
+    load_preset_stats,
+    preset_stat_key,
+)
 from .ui import (
     SUPPORTED_METHODS,
     aggregate_points_to_admin,
@@ -313,7 +318,18 @@ def _numeric_columns(layer: DataLayer) -> list[str]:
     ]
 
 
+def _is_air_quality_metric(name: str) -> bool:
+    """判断指标是否是 quotsoft 能供的空气质量指标（PM2.5 / PM10 / AQI …）。
+
+    用于把「统计类指标」和「空气质量指标」分开：前者走统计数据源，
+    后者走 quotsoft 站点数据，不能互相抢路径。
+    """
+    mapped = map_metric(name)
+    return mapped in set(FIELD_ALIASES.values())
+
+
 def _require_field(layer: DataLayer, field_name: str) -> None:
+
     if layer.gdf is not None and field_name in layer.gdf.columns:
         return
     raise FieldMissing(field_name, _numeric_columns(layer))
@@ -488,9 +504,12 @@ def _load_stats_from_api(
     stat_key: str,
     adcode: str,
     admin_layer: DataLayer,
+    *,
+    metric_label: str = "",
 ) -> tuple[pd.DataFrame, str] | None:
     """用聚汇数据开放 API 的免费榜单取「某地区下辖各市/区县」的指标值。
 
+    ``stat_key`` 是榜单 slug 前缀（gdp / renkou / yshouru / chengzhen …）。
     需要 ``MAPSMITH_STATS_API_KEY``；未配置或没匹配到榜单时返回 None。
     只用免费的 ``/ranking`` 接口，不调用扣积分的 ``/data/{id}``。
     """
@@ -506,7 +525,7 @@ def _load_stats_from_api(
         return None
     try:
         level = str(admin_layer.meta.get("level") or "")
-        got = fetch_region_stats(stat_key, level, names)
+        got = fetch_region_stats(stat_key, level, names, metric_label=metric_label)
     except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
         return None
     if got is None:
@@ -662,20 +681,32 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
             }
         raise DataError("统计表需要关联行政区后才能成图；请先转成点位或面图层再上传")
 
-    # 指标是 GDP / 人口这类社会经济统计量时，优先用 demo_data/stats/ 的预置数据集
-    # （真实公开统计，按 {adcode}_{指标} 命名），不需要用户准备 CSV。
-    stat_key = preset_stat_key(field_name)
-    if stat_key is not None:
+    # --- 社会经济统计指标（GDP / 人口 / 财政收入 / 城镇化率 …）---
+    # 1) 先看内置映射（gdp / population）；
+    # 2) 若不是空气质量指标且配了聚汇 API Key，把任意指标名解析成榜单 slug 前缀。
+    stat_slug = preset_stat_key(field_name)
+    if stat_slug is None and not _is_air_quality_metric(field_name):
+        from .tools.stats_api import resolve_metric_slug, stats_api_key
+
+        if stats_api_key():
+            try:
+                stat_slug = resolve_metric_slug(field_name)
+            except Exception:  # noqa: BLE001 - 解析失败按「不是统计指标」处理
+                stat_slug = None
+
+    if stat_slug is not None:
         admin_layer = load_admin(place, online=_allow_online())
         adcode = str(admin_layer.meta.get("adcode") or "")
-        preset = load_preset_stats(adcode, stat_key)
+        preset = load_preset_stats(adcode, stat_slug)
         if preset is None:
             # 没有预置数据：配了聚汇数据 API Key 就用它（榜单接口免费），
             # 命中后缓存到 demo_data/stats/，下次直接走预置路径。
-            preset = _load_stats_from_api(place, field_name, stat_key, adcode, admin_layer)
+            preset = _load_stats_from_api(
+                place, field_name, stat_slug, adcode, admin_layer, metric_label=field_name
+            )
         if preset is None and _allow_online_stats_search():
             # 实验性兜底：显式开启 MAPSMITH_SEARCH_ONLINE=1 时才联网检索。
-            preset = _search_online_stats(place, field_name, stat_key, adcode, admin_layer)
+            preset = _search_online_stats(place, field_name, stat_slug, adcode, admin_layer)
         if preset is not None:
             stats_df, stats_name = preset
             table_layer = DataLayer(
@@ -700,13 +731,10 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
                 "date": date,
                 "place": place,
             }
-        hint = ""
-        if _allow_online_stats_search():
-            hint = "（已开启联网搜索但没找到可信数据）"
         raise DataError(
-            f"{place} 没有预置的 {field_name} 统计数据（demo_data/stats/ 下没有 "
-            f"{adcode}_{stat_key}*.csv）{hint}。可以改为上传一份「行政区名 + {field_name}」"
-            "的 CSV，或先用其它指标（如 PM2.5）。"
+            f"{place} 没有可用的 {field_name} 统计数据（demo_data/stats/ 下没有预置文件，"
+            "聚汇数据 API 也没取到匹配榜单）。可以改为上传一份「行政区名 + 数值」的 CSV，"
+            "或先用其它指标（如 PM2.5）。"
         )
     admin, points = resolve_inputs(place, date, field_name, online=_allow_online())
     profile = profile_points(points, field_name=field_name, study_area=admin)
