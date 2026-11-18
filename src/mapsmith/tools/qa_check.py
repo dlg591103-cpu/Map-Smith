@@ -99,6 +99,23 @@ def _has_date(text: str) -> bool:
     return any(pattern.search(text) for pattern in DATE_PATTERNS)
 
 
+# 年度 / 季度口径：社会经济统计指标（GDP、人口、财政收入…）按年或按季发布，
+# 标题与来源里通常只写「2025」「2025年」「2025Q3」。审查规则要认这种口径，
+# 否则统计图会被 R01（标题缺时间）和 R05（来源缺日期）误判为不通过。
+# 裸年份（如标题里的「分布图（2026）」）也算：年份本身就是统计口径的一部分。
+PERIOD_PATTERNS = (
+    re.compile(r"(?:19|20)\d{2}\s*年"),
+    re.compile(r"(?:19|20)\d{2}\s*[Qq][1-4]"),
+    re.compile(r"(?:19|20)\d{2}\s*[-/]\s*[Qq][1-4]"),
+    re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)"),
+)
+
+
+def _has_period(text: str) -> bool:
+    """文本里是否带时间标记：完整日期，或年度/季度口径（含裸年份）。"""
+    return _has_date(text) or any(pattern.search(text) for pattern in PERIOD_PATTERNS)
+
+
 def _extract_date(text: str) -> str:
     for pattern in DATE_PATTERNS:
         match = pattern.search(text)
@@ -206,7 +223,7 @@ def _r01(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
 
     region = _region_token(extent)
     has_region = bool(region and region in title) or bool(REGION_PATTERN.search(title))
-    has_time = _has_date(title)
+    has_time = _has_period(title)
     has_metric = _title_metric_ok(title, region)
 
     missing: list[str] = []
@@ -269,7 +286,7 @@ def _r05(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
         return FAIL, "缺少 data_source_note", {
             "data_source_note": f"数据来源：<来源名称>；更新时间：{known_date}",
         }
-    if not _has_date(note):
+    if not _has_period(note):
         return FAIL, "data_source_note 缺少更新时间或日期", {
             "data_source_note": note + f"；更新时间：{known_date}",
         }

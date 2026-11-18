@@ -130,8 +130,8 @@ def list_rankings(word: str, *, limit: int = 50) -> list[dict[str, Any]]:
     return [item for item in items or [] if isinstance(item, dict)]
 
 
-def fetch_ranking(slug: str) -> tuple[list[dict[str, Any]], str] | None:
-    """按 slug 取榜单数据（免费）；返回 (行列表, 单位)。"""
+def fetch_ranking(slug: str) -> tuple[list[dict[str, Any]], str, int | None] | None:
+    """按 slug 取榜单数据（免费）；返回 (行列表, 单位, 数据年份)。"""
     data = _get(f"/ranking/{slug}")
     if not data:
         return None
@@ -139,6 +139,10 @@ def fetch_ranking(slug: str) -> tuple[list[dict[str, Any]], str] | None:
     if not isinstance(rows, list) or not rows:
         return None
     unit = str(data.get("unit") or "")
+    try:
+        year = int(data.get("year")) if data.get("year") is not None else None
+    except (TypeError, ValueError):
+        year = None
     cleaned: list[dict[str, Any]] = []
     for item in rows:
         if not isinstance(item, dict):
@@ -150,7 +154,7 @@ def fetch_ranking(slug: str) -> tuple[list[dict[str, Any]], str] | None:
             continue
         if name and value > 0:
             cleaned.append({"district": name, "value": value})
-    return (cleaned, unit) if cleaned else None
+    return (cleaned, unit, year) if cleaned else None
 
 
 def _pick_slug(
@@ -228,7 +232,7 @@ def fetch_region_stats(
     got = fetch_ranking(slug)
     if got is None:
         return None
-    rows, unit = got
+    rows, unit, year = got
     wanted = {_base_name(name) for name in admin_names}
     matched = [row for row in rows if _base_name(row["district"]) in wanted]
     if len(matched) < 2:
@@ -236,5 +240,9 @@ def fetch_region_stats(
     frame = pd.DataFrame(matched).drop_duplicates(subset=["district"])
     label = metric_label or metric_key
     scope = "全国各省" if level_key == "country" else "全国各地级市"
-    source = f"聚汇数据开放API「{scope}{label}排行榜」{('（单位：' + unit + '）') if unit else ''}"
+    # 数据期次写进来源注记：统计指标是年度口径，审查规则要求来源里带时间标记，
+    # 否则会判 R05「缺少更新时间或日期」。
+    period = f"（{year} 年数据）" if year else ""
+    unit_text = f"（单位：{unit}）" if unit else ""
+    source = f"聚汇数据开放API「{scope}{label}排行榜」{period}{unit_text}"
     return frame, source

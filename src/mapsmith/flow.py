@@ -739,7 +739,9 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
             table_layer = DataLayer(
                 kind="table",
                 name=stats_name,
-                source=f"统计数据 {stats_name}",
+                # source 直接沿用带期次的说明（如「聚汇数据开放API…2025 年数据」或
+                # 「320000_gdp_2025q3.csv」），审查规则 R05 要求来源里带时间标记。
+                source=stats_name,
                 summary=f"{stats_name}：{len(stats_df)} 行统计值",
                 table=stats_df,
             )
@@ -815,6 +817,22 @@ def _region_label(place: str) -> str:
     if re.search(r"(省|市|区|县|自治州|自治区|特别行政区|盟|旗)$", place):
         return place
     return place + "市"
+
+
+def _title_date(request_time: str, loaded: Mapping[str, Any]) -> str:
+    """标题用的时间标记：统计指标没有具体日期时，用数据源里的期次代替。
+
+    `run_one_sentence` 给统计指标补的是「最新」占位（数据源只给最新一期），
+    但审查规则 R01 要求标题含时间要素。这里从 `layer.source` 里提取年份
+    （如「…2025 年数据」「320000_gdp_2025q3.csv」），提到就用它。
+    """
+    text = _clean(request_time)
+    if text and re.search(r"\d{4}", text):
+        return text
+    layer = loaded.get("layer")
+    source = str(getattr(layer, "source", "") or "")
+    match = re.search(r"(20\d{2})", source)
+    return match.group(1) if match else text
 
 
 def _local_title(place: str, field_name: str, date: str) -> str:
@@ -1025,7 +1043,7 @@ def _map_type_hint(text: str) -> tuple[str, dict[str, Any]] | None:
 def _compose_spec(request: Mapping[str, str], loaded: Mapping[str, Any], draft: Mapping[str, Any]) -> MapSpec:
     """把 Cartographer 的决策与本地确定性字段合成合法 MapSpec。"""
     place = request["place"]
-    date = request["time"]
+    date = _title_date(request["time"], loaded)
     # 字段名以「加载后实际拿到的字段」为准：统计指标（人均GDP → renjun）与空气质量
     # （PM2.5 → PM2_5_24h）都会改名，直接用原话的指标名会报「字段不存在」。
     field_name = _clean(str(loaded.get("field") or "")) or request["metric"]
