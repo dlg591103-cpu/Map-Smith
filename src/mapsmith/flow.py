@@ -765,6 +765,16 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
             "聚汇数据 API 也没取到匹配榜单）。可以改为上传一份「行政区名 + 数值」的 CSV，"
             "或先用其它指标（如 PM2.5）。"
         )
+
+    # 走到这里说明指标既不是空气质量、也没解析出统计榜单。不能落到空气质量路径
+    # 上——那样会在加载后报「字段 X 不存在」这种看不懂的错误（用户实测过：
+    # 「小学生数量」没匹配到榜单，最后报的是可用字段是 AQI/CO/PM2.5）。
+    if field_name and not _is_air_quality_metric(field_name):
+        raise DataError(
+            f"「{field_name}」不是空气质量指标，也没有匹配到统计数据榜单。"
+            "可以改为上传一份「行政区名 + 数值」的 CSV，或换用空气质量指标（PM2.5 / AQI 等）。"
+        )
+
     admin, points = resolve_inputs(place, date, field_name, online=_allow_online())
     profile = profile_points(points, field_name=field_name, study_area=admin)
     return {

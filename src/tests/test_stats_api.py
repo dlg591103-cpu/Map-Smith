@@ -48,3 +48,26 @@ def test_pick_slug_falls_back_to_title_names():
 def test_pick_slug_returns_none_when_no_match():
     assert _pick_slug([], "320000", {"南京市"}) is None
     assert _pick_slug([{"slug": "x", "title": "无关榜单"}], "320000", {"南京市"}) is None
+
+
+def test_resolve_metric_slug_contains_match():
+    """口语说法常带装饰词：包含匹配要能命中内置别名。
+
+    实测问题：用户说「小学生数量」，精确查表失配（内置键是「小学生数」），
+    动态搜索也没结果，最后静默落到空气质量路径、报「可用字段 AQI/CO/PM2.5」。
+    """
+    from mapsmith.tools.stats_api import resolve_metric_slug
+
+    assert resolve_metric_slug("小学生数量") == "xiaoxue"
+    assert resolve_metric_slug("初中生数量") == "chuzhong"
+    assert resolve_metric_slug("常住人口") == "renkou"
+    assert resolve_metric_slug("人口总数") == "renkou"
+    assert resolve_metric_slug("财政收入") == "yshouru"
+
+
+def test_resolve_metric_slug_unknown_returns_none(monkeypatch):
+    """聚汇确实没有的指标返回 None，由调用方给明确提示，不静默走空气路径。"""
+    monkeypatch.setenv("MAPSMITH_STATS_API_KEY", "")
+    from mapsmith.tools.stats_api import resolve_metric_slug
+
+    assert resolve_metric_slug("受教育率") is None

@@ -190,8 +190,10 @@ def _pick_slug(
 def resolve_metric_slug(metric_name: str) -> str | None:
     """把用户/模型给的指标名映射到榜单 slug 前缀。
 
-    先用内置别名表；未命中时调 ``/ranking/list?word=...`` 动态搜索，取标题里
-    最匹配的那条（去掉层级后缀，只留前缀如 ``yshouru``）。
+    三级匹配：
+    1. 内置别名表精确命中；
+    2. **包含匹配**（「小学生数量」包含「小学生数」→ xiaoxue），取最长键；
+    3. 调 ``/ranking/list?word=...`` 动态搜索。
     """
     text = str(metric_name or "").strip()
     if not text:
@@ -199,6 +201,14 @@ def resolve_metric_slug(metric_name: str) -> str | None:
     key = re.sub(r"[\s_\-（）()]", "", text).lower()
     if key in _METRIC_SLUGS:
         return _METRIC_SLUGS[key]
+    # 包含匹配：口语里的说法常带装饰词（「小学生数量」「常住人口总数」），
+    # 精确查表会漏掉，取命中的最长键最稳。
+    contained = [slug for hint, slug in _METRIC_SLUGS.items() if hint in key or key in hint]
+    if contained:
+        longest = max(
+            (hint for hint in _METRIC_SLUGS if hint in key or key in hint), key=len
+        )
+        return _METRIC_SLUGS[longest]
     # 低置信度的动态搜索：只在显式配置了 Key 时进行
     if not stats_api_key():
         return None
