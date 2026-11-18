@@ -327,11 +327,14 @@ def load_air(
     sites_path: str | Path | None = None,
     data_path: str | Path | None = None,
     online: bool = True,
+    # 省级取数时传入省内各市名：quotsoft 的站点按「地级市」归属，
+    # 直接用省名（「浙江省」）匹配一个站都匹配不到。
+    city_names: list[str] | None = None,
     # 单日全国站点 CSV 约 1.5 MB，quotsoft 实测下行约 12 KB/s，20 秒太紧；
     # 这里是「无数据到达」的读取超时，正常下载不会反复触发。
     timeout: float = 120.0,
 ) -> DataLayer:
-    """加载某城市某日的站点空气质量。`day` 支持 `YYYYMMDD` 或 `YYYY-MM-DD`。"""
+    """加载某城市（或某省内各市）某日的站点空气质量。`day` 支持 `YYYYMMDD`/`YYYY-MM-DD`。"""
     day_text = str(day).replace("-", "")
     if len(day_text) != 8 or not day_text.isdigit():
         raise DataError(f"日期格式应为 YYYYMMDD，实际为 {day!r}")
@@ -378,10 +381,22 @@ def load_air(
     series = series.drop(columns=["aggregate"]).rename(columns={"value": field})
     merged = sites.merge(series, on="station_code", how="inner")
 
-    city_matched = merged[merged["city"].str.contains(city_bare, na=False)]
+    if city_names:
+        # 省级取数：quotsoft 的站点按地级市归属，用省内各市名逐个匹配。
+        # 市名去掉「市」后缀后与站点表里的写法对齐（「杭州市」→「杭州」）。
+        bare_names = [str(name).strip().removesuffix("市") for name in city_names if str(name).strip()]
+        city_matched = merged[
+            merged["city"].astype(str).apply(
+                lambda city: any(name and name in city for name in bare_names)
+            )
+        ]
+        label = f"{resolved.full_name}下辖 {len(bare_names)} 个市"
+    else:
+        city_matched = merged[merged["city"].str.contains(city_bare, na=False)]
+        label = f"「{city_bare}」"
     if city_matched.empty:
         raise DataError(
-            f"{resolved.full_name}：站点列表中没有匹配「{city_bare}」的站点；"
+            f"{resolved.full_name}：站点列表中没有匹配{label}的站点；"
             "请确认站点列表是否包含该城市"
         )
 

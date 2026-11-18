@@ -22,6 +22,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 from scipy.interpolate import griddata
 from scipy.spatial import ConvexHull
@@ -30,6 +31,8 @@ from ..io.models import DataError
 from ..spec import MapSpec
 from .choropleth import _aspect_for, _transformed_extent
 from .layout import (
+    AQI_COLORS,
+    AQI_SCHEMES,
     LayoutReport,
     _place_labels_avoiding_overlap,
     apply_layout,
@@ -248,7 +251,18 @@ def render_idw(
     fig, ax = plt.subplots(figsize=spec.layout.size)
 
     # IDW 是连续插值面，用连续色阶渲染；图例用分级断点 Patch 做示意性标注。
-    cmap = plt.get_cmap(spec.palette.scheme)
+    # AQI 用国标六级色阶（AQI6 是自定义方案名、不是 matplotlib colormap），
+    # 直接 get_cmap("AQI6") 会抛 ValueError；这里把国标六级色插值成连续色阶。
+    scheme = spec.palette.scheme
+    if str(scheme).strip().lower() in AQI_SCHEMES:
+        cmap = LinearSegmentedColormap.from_list(
+            "aqi6_continuous", list(reversed(AQI_COLORS)) if spec.palette.reverse else list(AQI_COLORS)
+        )
+    else:
+        try:
+            cmap = plt.get_cmap(scheme)
+        except ValueError as exc:
+            raise DataError(f"未知配色方案 {scheme!r}") from exc
     vmin = float(np.nanmin(grid_z))
     vmax = float(np.nanmax(grid_z))
     ax.imshow(
