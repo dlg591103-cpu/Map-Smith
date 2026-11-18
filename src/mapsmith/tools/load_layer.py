@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import io as text_io
+import time
 from datetime import date as date_type
 from pathlib import Path
 from typing import Any
@@ -78,18 +79,68 @@ def _local_admin_paths(adcode: str) -> list[Path]:
     return [root / f"{adcode}_full.json", root / f"{adcode}.json"]
 
 
+# 国内数据源（quotsoft）直连通常比经系统代理更稳，但个别网络只能走代理，
+# 所以按「直连 → 直连 → 环境代理」的顺序尝试：两次直连容忍一次瞬时抖动，最后用代理兜底。
+_DOWNLOAD_PLAN = (False, False, True)
+_RETRY_DELAY_S = 2.0
+# 整体预算：quotsoft 单日文件约 1.6 MB、下行可能只有 12 KB/s，一次就可能上百秒，
+# 预算耗尽后不再继续重试，避免用户界面长时间无响应。
+_DOWNLOAD_BUDGET_S = 240.0
+_CONNECT_TIMEOUT_S = 15.0
+
+
+def _fetch_once(url: str, timeout: float, *, trust_env: bool) -> str:
+    import requests
+
+    session = requests.Session()
+    session.trust_env = trust_env
+    try:
+        response = session.get(url, timeout=(_CONNECT_TIMEOUT_S, timeout))
+    finally:
+        session.close()
+    if response.status_code != 200:
+        raise DataError(f"数据源返回 HTTP {response.status_code}：{url}")
+    return response.text
+
+
+def _net_hint(requests: Any, exc: BaseException | None) -> str:
+    """把 requests 的原始异常翻成用户能看懂的一句话；技术细节只留类型名。"""
+    errors = requests.exceptions
+    if exc is None:
+        return "数据源请求失败"
+    if isinstance(exc, errors.SSLError):
+        return "数据源连接被中断（TLS 提前断开），通常是网络或代理不稳定"
+    if isinstance(exc, errors.ReadTimeout):
+        return "数据源响应超时（文件较大或网速过慢）"
+    if isinstance(exc, errors.ConnectTimeout):
+        return "连接数据源超时"
+    if isinstance(exc, errors.ConnectionError):
+        return "无法连接数据源（连接被重置或网络不可达）"
+    return f"数据源请求失败（{type(exc).__name__}）"
+
+
 def _download(url: str, timeout: float) -> str:
     try:
         import requests
     except ImportError as exc:
         raise DataError("缺少 requests，无法联网取数据；请按 requirements.lock 安装依赖") from exc
-    try:
-        response = requests.get(url, timeout=timeout)
-    except requests.RequestException as exc:
-        raise DataError(f"联网请求失败：{url}（{exc}）") from exc
-    if response.status_code != 200:
-        raise DataError(f"联网请求返回 HTTP {response.status_code}：{url}")
-    return response.text
+
+    deadline = time.monotonic() + _DOWNLOAD_BUDGET_S
+    last: BaseException | None = None
+    attempts = 0
+    for index, trust_env in enumerate(_DOWNLOAD_PLAN):
+        if index and time.monotonic() > deadline:
+            break
+        attempts += 1
+        try:
+            return _fetch_once(url, timeout, trust_env=trust_env)
+        except requests.RequestException as exc:
+            last = exc
+            if time.monotonic() > deadline:
+                break
+            if index + 1 < len(_DOWNLOAD_PLAN):
+                time.sleep(_RETRY_DELAY_S)
+    raise DataError(f"{_net_hint(requests, last)}，已尝试 {attempts} 次仍失败：{url}")
 
 
 def _as_place(place: str | PlaceResult, *, online: bool, timeout: float) -> PlaceResult:

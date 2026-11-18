@@ -102,6 +102,14 @@ def _base_name(name: str) -> str:
     return text
 
 
+# 本地指标标识 → 聚汇榜单的 slug 前缀。多数两者同名（gdp），但人口是拼音
+# `renkou`：拼错会返回「数据不存在或不可访问」，表现为「取不到任何榜单」。
+_API_SLUG_PREFIXES: dict[str, str] = {
+    "population": "renkou",
+    "gdp": "gdp",
+}
+
+
 def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
     try:
         response = requests.get(
@@ -228,7 +236,10 @@ def fetch_region_stats(
         return None
     level_key = "province" if str(level).lower() == "province" else "country"
     suffix = "city" if level_key == "province" else "province"
-    slug = f"{metric_key}/{suffix}"
+    # 本地指标标识（gdp / population）与聚汇的 slug 前缀不一致：人口的榜单是
+    # `renkou/*`（拼音），若直接拼 `population/city` 会取不到任何榜单。
+    api_prefix = _API_SLUG_PREFIXES.get(metric_key, metric_key)
+    slug = f"{api_prefix}/{suffix}"
     got = fetch_ranking(slug)
     if got is None:
         return None
