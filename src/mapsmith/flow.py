@@ -563,6 +563,49 @@ def _load_stats_from_api(
     return frame, f"{source}（已缓存 {filename}）"
 
 
+def _load_county_stats(
+    place: str,
+    field_name: str,
+    admin_layer: DataLayer,
+) -> tuple[pd.DataFrame, str] | None:
+    """市级：取「该市下辖各区县」的某项指标。
+
+    聚汇的免费榜单只到地级市，区县级数据只能走「搜索指标 → 按 id 取数」，而取数
+    按「买断限期访问权限」计费（1 积分/指标 365 天）。因此行为分三种：
+
+    - 有积分：正常返回 ``(DataFrame, 来源说明)``；
+    - 没积分：抛 `DataError` 说明需要多少积分、以及可以改用上传 CSV；
+    - 搜不到该指标：返回 None，由上层继续尝试其它路径。
+    """
+    from .tools.stats_api import fetch_county_stats, stats_api_key
+
+    if not stats_api_key():
+        return None
+    boundary = admin_layer.gdf
+    if boundary is None or "name" not in boundary.columns:
+        return None
+    county_names = [str(value).strip() for value in boundary["name"].dropna() if str(value).strip()]
+    if not county_names:
+        return None
+    try:
+        result = fetch_county_stats(
+            place, field_name, county_names, metric_label=field_name, confirm=True
+        )
+    except Exception:  # noqa: BLE001 - 外部接口异常退化为「没取到」
+        return None
+    if isinstance(result, dict):
+        # 报价：余额不足（或首次需确认）时聚汇返回 need_authorization
+        quote = str(result.get("message") or "").strip()
+        cost = result.get("points_cost")
+        balance = result.get("points_balance")
+        raise DataError(
+            f"区县级统计数据需要积分购买：{quote or '聚汇返回需授权'}"
+            f"（本次费用 {cost} 积分，当前余额 {balance}）。"
+            "请到聚汇数据会员中心充值后重试；也可以直接上传一份「区县名 + 数值」的 CSV 出图。"
+        )
+    return result
+
+
 def _search_online_stats(
     place: str,
     field_name: str,
@@ -723,9 +766,14 @@ def _load_layers(request: Mapping[str, str], upload: UploadRecord | None) -> dic
 
     if stat_slug is not None:
         admin_layer = load_admin(place, online=_allow_online())
+        level = str(admin_layer.meta.get("level") or "")
         adcode = str(admin_layer.meta.get("adcode") or "")
         preset = load_preset_stats(adcode, stat_slug)
-        if preset is None:
+        if preset is None and level == "city":
+            # 市级边界下辖的是「区县」，而聚汇没有区县级榜单，只能走
+            # 「搜索指标 → 按 id 取数」；取数要 1 积分/指标（买断 365 天）。
+            preset = _load_county_stats(place, field_name, admin_layer)
+        if preset is None and level != "city":
             # 没有预置数据：配了聚汇数据 API Key 就用它（榜单接口免费），
             # 命中后缓存到 demo_data/stats/，下次直接走预置路径。
             preset = _load_stats_from_api(
